@@ -1,0 +1,21 @@
+{
+  "name": "Monitor Neonatal — RCP Simulación",
+  "short_name": "NeoMonitor",
+  "description": "Simulador de monitor neonatal para RCP — CEFEN · SAP",
+  "start_url": "./monitor_neonatal_15_.html",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#071528",
+  "theme_color": "#071528",
+  "lang": "es",
+  "dir": "ltr",
+  "categories": ["medical", "education"],
+  "prefer_related_applications": false,
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

@@ -1,0 +1,3846 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#071528">
+<meta name="application-name" content="NeoMonitor">
+<meta name="description" content="Simulador de monitor neonatal para RCP — CEFEN · SAP">
+<link rel="manifest" href="manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="NeoMonitor">
+<link rel="apple-touch-icon" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" sizes="512x512" href="icon-512.png">
+<meta name="msapplication-TileColor" content="#071528">
+<meta name="msapplication-TileImage" content="icon-192.png">
+<meta name="msapplication-navbutton-color" content="#071528">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<title>Monitor Neonatal — Simulación</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700&display=swap" rel="stylesheet">
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+/* ── ROTATE OVERLAY (portrait en móvil) ── */
+#rotate-overlay {
+  display: none;
+  position: fixed; inset: 0; z-index: 9999;
+  background: #071528;
+  flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 20px;
+  font-family: 'Rajdhani', sans-serif;
+}
+#rotate-overlay.show { display: flex; }
+.rotate-icon { font-size: 64px; animation: rotate-hint 1.5s ease-in-out infinite; }
+@keyframes rotate-hint {
+  0%,100% { transform: rotate(0deg); }
+  50%      { transform: rotate(90deg); }
+}
+.rotate-text { font-size: 18px; font-weight: 700; color: #6aaad4; letter-spacing: 1px; text-align: center; }
+.rotate-sub  { font-size: 13px; color: #3d6a9a; text-align: center; }
+
+/* En pantallas muy angostas (portrait móvil) ocultamos el monitor */
+@media (max-width: 500px) and (orientation: portrait) {
+  #monitor, #instructor-panel { display: none !important; }
+  #rotate-overlay { display: flex !important; }
+}
+
+:root {
+  --bg:    #0b1e3a;
+  --bg2:   #0d2548;
+  --bg3:   #102d56;
+  --border:#1a4a7a;
+  --ecg:   #00ff99;
+  --spo2:  #00d4ff;
+  --resp:  #ffe066;
+  --etco2: #ffaa33;
+  --nbp:   #ff66cc;
+  --temp:  #ff7a7a;
+  --hr-color: #00ff99;
+  --mono: 'Share Tech Mono', monospace;
+  --ui: 'Rajdhani', sans-serif;
+  --alarm: #ff3344;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+html, body {
+  width: 100%; height: 100%;
+  background: var(--bg);
+  color: #e8f4ff;
+  font-family: var(--ui);
+  overflow: hidden;
+  user-select: none;
+}
+
+/* ── LAYOUT ── */
+#monitor {
+  width: 100vw; height: 100vh;
+  display: grid;
+  grid-template-rows: 52px 1fr 110px;
+  grid-template-columns: 1fr 200px;
+  gap: 0;
+}
+
+/* ── TOPBAR ── */
+#topbar {
+  grid-column: 1 / -1;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 16px;
+  padding: 0 16px;
+}
+.tb-logo { font-family: var(--mono); font-size: 13px; color: #aaa; letter-spacing: 2px; }
+.tb-mode { font-size: 12px; font-weight: 600; color: #ffcc00; letter-spacing: 1px; background: #332200; border-radius: 4px; padding: 3px 8px; }
+.tb-time { font-family: var(--mono); font-size: 13px; color: #6aaad4; margin-left: auto; }
+.tb-date { font-family: var(--mono); font-size: 11px; color: #4a7aaa; }
+
+/* ── WAVEFORMS AREA ── */
+#waveforms {
+  grid-column: 1;
+  display: flex; flex-direction: column;
+  padding: 4px 0;
+  overflow: hidden;
+}
+.wave-row {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 80px 1fr;
+  border-bottom: 1px solid var(--border);
+  min-height: 0;
+}
+.wave-row:last-child { border-bottom: none; }
+.wave-label {
+  display: flex; flex-direction: column;
+  justify-content: center; padding: 6px 8px;
+  border-right: 1px solid var(--border);
+  background: var(--bg2);
+}
+.wl-name { font-size: 11px; font-weight: 700; letter-spacing: 1.5px; }
+.wl-speed { font-size: 9px; color: #4a7aaa; margin-top: 2px; }
+.wave-canvas-wrap { position: relative; overflow: hidden; }
+canvas.wave { width: 100%; height: 100%; display: block; }
+
+/* ── PARAMS PANEL ── */
+#params {
+  grid-column: 2;
+  grid-row: 2;
+  display: flex; flex-direction: column;
+  background: var(--bg);
+  border-left: 1px solid var(--border);
+  overflow: hidden;
+}
+.param-box {
+  flex: 1;
+  display: flex; flex-direction: column;
+  justify-content: center;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.15s;
+  min-height: 0;
+  position: relative;
+}
+.param-box:hover { background: #122b50; }
+.param-box:last-child { border-bottom: none; }
+.param-name { font-size: 10px; font-weight: 700; letter-spacing: 1.5px; }
+.param-value {
+  font-family: var(--mono); line-height: 1;
+  margin: 2px 0;
+  transition: color 0.3s;
+}
+.param-unit { font-size: 10px; color: #5588bb; font-family: var(--mono); }
+.param-limits { font-size: 9px; color: #3d6a9a; font-family: var(--mono); display: flex; gap: 6px; }
+.alarm-indicator {
+  position: absolute; top: 4px; right: 6px;
+  width: 7px; height: 7px; border-radius: 50%;
+  display: none;
+}
+.alarm-indicator.active { display: block; background: var(--alarm); animation: blink 0.6s infinite; }
+
+/* ── BOTTOM BAR ── */
+#bottombar {
+  grid-column: 1 / -1;
+  background: var(--bg2);
+  border-top: 2px solid var(--border);
+  display: flex; align-items: center; gap: 0;
+}
+
+/* CRONÓMETRO */
+#timer-section {
+  display: flex; align-items: center; gap: 14px;
+  padding: 0 20px;
+  border-right: 1px solid var(--border);
+  height: 100%;
+  min-width: 260px;
+}
+.timer-label { font-size: 10px; font-weight: 700; color: #6aaad4; letter-spacing: 1.5px; text-transform: uppercase; }
+#timer-display {
+  font-family: var(--mono); font-size: 36px; font-weight: 400;
+  color: #ffcc00; letter-spacing: 2px; line-height: 1;
+  min-width: 110px;
+}
+#timer-display.running { color: #00ff44; }
+#timer-display.alert { color: var(--alarm); animation: blink 1s infinite; }
+.timer-btns { display: flex; flex-direction: column; gap: 4px; }
+.tbtn {
+  font-family: var(--ui); font-size: 11px; font-weight: 700;
+  border: 1px solid #1e5080; border-radius: 4px; padding: 5px 10px;
+  cursor: pointer; letter-spacing: 1px; transition: all 0.15s;
+  min-width: 70px; text-align: center;
+}
+#btn-start { background: #003300; color: #00ff44; border-color: #00aa22; }
+#btn-start:hover { background: #004400; }
+#btn-start.stop { background: #330000; color: #ff4444; border-color: #aa2222; }
+#btn-reset { background: #122b50; color: #6aaad4; }
+#btn-reset:hover { background: #222; color: #aaa; }
+.timer-events { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; max-height: 80px; min-width: 120px; }
+.tevent { font-size: 10px; font-family: var(--mono); color: #5588bb; white-space: nowrap; }
+.tevent.new { color: #ffcc00; }
+#btn-mark {
+  background: #1a1000; color: #ffaa00; border-color: #664400;
+  font-size: 10px; padding: 4px 8px;
+}
+#btn-mark:hover { background: #221500; }
+
+#scenarios-section {
+  display: flex; align-items: center; gap: 10px;
+  padding: 0 16px;
+  border-right: 1px solid var(--border);
+  height: 100%;
+  flex: 1;
+  overflow-x: auto;
+}
+.sec-label { font-size: 10px; font-weight: 700; color: #6aaad4; letter-spacing: 1.5px; white-space: nowrap; }
+.scenario-btns { display: flex; gap: 6px; flex-wrap: nowrap; }
+  font-family: var(--ui); font-size: 11px; font-weight: 700;
+  border: 1px solid #1e5080; border-radius: 6px; padding: 6px 12px;
+  cursor: pointer; letter-spacing: 0.5px; transition: all 0.15s;
+  white-space: nowrap; background: #122b50; color: #aaa;
+}
+
+/* CTRL PANEL TOGGLE */
+#ctrl-toggle {
+  height: 100%; padding: 0 16px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; background: #0d2548; border-left: 1px solid var(--border);
+  font-size: 10px; font-weight: 700; color: #5588bb; letter-spacing: 1px;
+  flex-direction: column; gap: 4px; min-width: 60px;
+  transition: background 0.15s;
+}
+#ctrl-toggle:hover { background: #122b50; color: #aaa; }
+#ctrl-toggle svg { width: 20px; height: 20px; }
+
+/* ── CONTROL PANEL OVERLAY ── */
+#ctrl-panel {
+  position: fixed; bottom: 110px; right: 0;
+  width: 320px; max-height: calc(100vh - 162px);
+  background: #0d2548; border: 1px solid #1e5080;
+  border-radius: 12px 0 0 0; overflow-y: auto;
+  transform: translateX(100%); transition: transform 0.25s ease;
+  z-index: 50;
+}
+#ctrl-panel.open { transform: translateX(0); }
+.cp-header {
+  background: #122b50; padding: 12px 16px;
+  font-size: 11px; font-weight: 700; color: #6aaad4;
+  letter-spacing: 1.5px; display: flex; justify-content: space-between;
+  position: sticky; top: 0; border-bottom: 1px solid #1a4070;
+}
+.cp-close { cursor: pointer; color: #4a7aaa; font-size: 16px; }
+.cp-close:hover { color: #aaa; }
+.cp-param { padding: 10px 16px; border-bottom: 1px solid #122b50; }
+.cp-param-name { font-size: 10px; font-weight: 700; letter-spacing: 1px; margin-bottom: 6px; }
+.cp-row { display: flex; align-items: center; gap: 10px; }
+.cp-row input[type=range] {
+  flex: 1; -webkit-appearance: none; height: 4px;
+  border-radius: 2px; outline: none; cursor: pointer;
+}
+.cp-val { font-family: var(--mono); font-size: 13px; min-width: 50px; text-align: right; color: #ddd; }
+.cp-alarms { display: flex; gap: 8px; margin-top: 6px; }
+.cp-alarm-btn {
+  font-size: 10px; font-weight: 700; border-radius: 4px; padding: 3px 8px;
+  border: 1px solid; cursor: pointer; font-family: var(--ui); transition: all 0.12s;
+}
+
+/* ── ALARM BANNER ── */
+#alarm-banner {
+  position: fixed; top: 52px; left: 0; right: 200px;
+  background: var(--alarm); color: #e8f4ff;
+  font-family: var(--mono); font-size: 13px; font-weight: 700;
+  padding: 6px 14px; letter-spacing: 1px;
+  display: none; z-index: 40; animation: blink-bg 0.5s infinite;
+  cursor: pointer;
+}
+#alarm-banner.show { display: flex; align-items: center; gap: 10px; }
+
+/* ── FULLSCREEN BTN ── */
+#fs-btn {
+  position: fixed; top: 56px; right: 208px;
+  background: #122b50; border: 1px solid #1e5080;
+  color: #4a7aaa; border-radius: 0 0 0 8px;
+  padding: 5px 8px; cursor: pointer; font-size: 11px;
+  z-index: 30; transition: all 0.15s;
+}
+#fs-btn:hover { color: #aaa; background: #222; }
+
+/* ── ANIMATIONS ── */
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+@keyframes blink-bg { 0%,100%{opacity:1} 50%{opacity:0.7} }
+
+/* ── SCROLLBAR ── */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: #0d2548; }
+::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+
+/* ── APGAR IN PARAMS PANEL ── */
+.apgar-params-box {
+  background: #0a2040;
+  border-top: 2px solid #ffcc00;
+  padding: 6px 8px 8px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.apgar-params-title {
+  font-size: 9px; font-weight: 700; letter-spacing: 1.5px;
+  color: #ffcc00; margin-bottom: 2px;
+}
+.apgar-row {
+  display: grid; grid-template-columns: repeat(5,1fr); gap: 3px;
+}
+.apgar-slot {
+  display: flex; flex-direction: column; align-items: center;
+  padding: 4px 2px; border-radius: 6px;
+  border: 1px solid #1a4a7a; background: #0d2548;
+  cursor: default;
+}
+.apgar-slot.enabled { cursor: pointer; border-color: #554400; background: #1a1200; }
+.apgar-slot.enabled:hover { border-color: #ffcc00; background: #221800; }
+.apgar-slot.ready { border-color: #ffcc00; background: #1a1500; animation: pulse-gold 1.5s infinite; }
+.apgar-slot.done-good { border-color: #00cc44; background: #062040; cursor: pointer; }
+.apgar-slot.done-warn { border-color: #ffaa00; background: #1a1000; cursor: pointer; }
+.apgar-slot.done-crit { border-color: #ff3333; background: #0e1e40; cursor: pointer; }
+.apgar-slot-time { font-size: 8px; font-weight: 700; color: #5588bb; letter-spacing: 0.5px; }
+.apgar-slot-score {
+  font-family: var(--mono); font-size: 20px; font-weight: 400; line-height: 1.1;
+}
+.apgar-slot.done-good .apgar-slot-score { color: #00ff44; }
+.apgar-slot.done-warn .apgar-slot-score { color: #ffaa00; }
+.apgar-slot.done-crit .apgar-slot-score { color: #ff3333; }
+.apgar-slot.locked .apgar-slot-score, .apgar-slot.locked .apgar-slot-time { color: #1a4a7a; }
+.apgar-slot.ready .apgar-slot-score { color: #ffcc00; }
+.apgar-slot.enabled .apgar-slot-score { color: #887744; }
+@keyframes pulse-gold {
+  0%,100%{ box-shadow: 0 0 0 0 rgba(255,204,0,0); }
+  50%{ box-shadow: 0 0 6px 2px rgba(255,204,0,0.45); }
+}
+
+/* ── APGAR MODAL (popup al llegar al minuto) ── */
+#apgar-modal-overlay {
+  position: fixed; inset: 0; z-index: 200;
+  background: rgba(0,0,0,0.82); backdrop-filter: blur(3px);
+  display: none; align-items: center; justify-content: center;
+}
+#apgar-modal-overlay.open { display: flex; }
+#apgar-modal {
+  background: #0d2548; border: 1px solid #1e5080; border-radius: 16px;
+  padding: 0; width: min(580px, 95vw); max-height: 90vh;
+  overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.8);
+  animation: modal-in 0.25s ease;
+}
+@keyframes modal-in {
+  from { opacity:0; transform: scale(0.92) translateY(20px); }
+  to   { opacity:1; transform: scale(1)    translateY(0); }
+}
+.am-header {
+  background: linear-gradient(135deg, #062040, #0a3060);
+  border-bottom: 1px solid #333;
+  padding: 16px 20px;
+  display: flex; align-items: center; justify-content: space-between;
+  border-radius: 16px 16px 0 0;
+}
+.am-title { font-size: 18px; font-weight: 700; letter-spacing: 1px; }
+.am-minute { font-family: var(--mono); font-size: 24px; color: #ffcc00; font-weight: 400; }
+.am-body { padding: 18px 20px; }
+.am-criteria { display: flex; flex-direction: column; gap: 10px; }
+.am-crit-row {
+  background: #122b50; border: 1px solid #1a4a7a;
+  border-radius: 10px; padding: 12px 14px;
+}
+.am-crit-name { font-size: 12px; font-weight: 700; letter-spacing: 1px; color: #aaa; margin-bottom: 8px; }
+.am-crit-opts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.am-opt {
+  border: 1px solid #1e5080; border-radius: 8px; padding: 8px 6px;
+  cursor: pointer; text-align: center; transition: all 0.15s;
+  background: #0d2548; font-family: var(--ui);
+}
+.am-opt:hover { border-color: #4a7aaa; background: #1e1e1e; }
+.am-opt.selected { border-color: #ffcc00; background: #1a1500; }
+.am-opt-val { font-family: var(--mono); font-size: 22px; font-weight: 400; color: #e8f4ff; line-height: 1; }
+.am-opt-desc { font-size: 10px; color: #5588bb; margin-top: 3px; line-height: 1.3; }
+.am-opt.selected .am-opt-desc { color: #ffaa00; }
+.am-total-row {
+  margin-top: 14px; padding: 14px;
+  background: #0a1e3a; border-radius: 10px;
+  display: flex; align-items: center; justify-content: space-between;
+  border: 1px solid #1a4070;
+}
+.am-total-label { font-size: 13px; font-weight: 700; letter-spacing: 1px; color: #6aaad4; }
+.am-total-val { font-family: var(--mono); font-size: 42px; font-weight: 400; line-height: 1; }
+.am-total-interp { font-size: 12px; font-weight: 700; letter-spacing: 1px; margin-top: 2px; text-align: right; }
+.am-footer { padding: 14px 20px 18px; display: flex; gap: 10px; justify-content: flex-end; border-top: 1px solid #122b50; }
+.am-btn {
+  font-family: var(--ui); font-size: 13px; font-weight: 700;
+  border-radius: 8px; padding: 10px 20px; cursor: pointer; border: 1px solid;
+  letter-spacing: 0.5px; transition: all 0.15s;
+}
+.am-btn-confirm { background: #003300; color: #00ff44; border-color: #00aa22; }
+.am-btn-confirm:hover { background: #004400; }
+.am-btn-skip { background: #122b50; color: #5588bb; border-color: #333; }
+.am-btn-skip:hover { color: #aaa; border-color: #4a7aaa; }
+
+/* ── ALARM CONFIG MODAL ── */
+#alarm-modal-overlay {
+  position: fixed; inset: 0; z-index: 200;
+  background: rgba(0,0,0,0.82); backdrop-filter: blur(3px);
+  display: none; align-items: center; justify-content: center;
+}
+#alarm-modal-overlay.open { display: flex; }
+#alarm-modal {
+  background: #0d2548; border: 1px solid #1e5080; border-radius: 16px;
+  padding: 0; width: min(480px, 95vw); max-height: 90vh;
+  overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.8);
+  animation: modal-in 0.25s ease;
+}
+.alm-header {
+  background: #0e1e40; border-bottom: 1px solid #330000;
+  padding: 14px 20px; border-radius: 16px 16px 0 0;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.alm-title { font-size: 16px; font-weight: 700; color: #ff4444; letter-spacing: 1px; }
+.alm-close { cursor: pointer; color: #4a7aaa; font-size: 18px; }
+.alm-close:hover { color: #aaa; }
+.alm-body { padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; }
+.alm-row {
+  display: grid; grid-template-columns: 100px 1fr 60px 1fr 60px;
+  align-items: center; gap: 8px; padding: 10px 12px;
+  background: #122b50; border-radius: 8px; border: 1px solid #1a4a7a;
+}
+.alm-name { font-size: 11px; font-weight: 700; letter-spacing: 1px; }
+.alm-label { font-size: 10px; color: #4a7aaa; text-align: center; }
+.alm-input {
+  width: 100%; background: #0a2040; border: 1px solid #1e5080;
+  border-radius: 6px; padding: 7px 8px; color: #e8f4ff;
+  font-family: var(--mono); font-size: 14px; text-align: center;
+  -webkit-appearance: none;
+}
+.alm-input:focus { outline: none; border-color: #ff4444; }
+.alm-footer { padding: 12px 20px 16px; display: flex; gap: 10px; justify-content: flex-end; border-top: 1px solid #122b50; }
+
+/* ── INSTRUCTOR PANEL ── */
+#instructor-panel {
+  display: none;
+  width: 100vw; height: 100vh;
+  background: #0a2040;
+  font-family: var(--ui);
+  overflow: hidden;
+  flex-direction: column;
+}
+#instructor-panel.active { display: flex; }
+#monitor.hidden { display: none; }
+
+/* Two-column layout: live monitor + controls */
+#ip-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Left: live monitor preview */
+#ip-live-monitor {
+  width: 340px;
+  min-width: 280px;
+  flex-shrink: 0;
+  background: #071528;
+  border-right: 2px solid #122b50;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+#ip-live-title {
+  background: #0d2548;
+  border-bottom: 1px solid #122b50;
+  padding: 8px 12px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+#ip-live-title span {
+  font-size: 9px; font-weight: 700; letter-spacing: 1.5px; color: #4a7aaa; text-transform: uppercase;
+}
+#ip-live-dot {
+  width: 7px; height: 7px; border-radius: 50%; background: #00ff44;
+  animation: blink 1.5s infinite;
+}
+
+/* Mini params inside live monitor */
+#ip-live-params {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: #0d2548;
+  border-bottom: 1px solid #122b50;
+  padding: 6px;
+  gap: 6px;
+}
+.ip-live-param {
+  background: #0a1e3a;
+  border-radius: 6px;
+  padding: 5px 8px;
+  border: 1px solid #122b50;
+}
+.ip-live-param-name { font-size: 9px; font-weight: 700; letter-spacing: 1px; }
+.ip-live-param-val  { font-family: var(--mono); font-size: 24px; line-height: 1.1; }
+.ip-live-param-unit { font-size: 9px; color: #3d6a9a; font-family: var(--mono); }
+
+/* Waveforms inside live monitor */
+#ip-live-waves {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 4px;
+  gap: 2px;
+}
+.ip-wave-row {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  border-radius: 4px;
+  overflow: hidden;
+  background: #0a1e3a;
+  border: 1px solid #111;
+}
+.ip-wave-label {
+  position: absolute; left: 4px; top: 3px;
+  font-size: 8px; font-weight: 700; letter-spacing: 1px;
+  pointer-events: none; z-index: 2;
+}
+.ip-wave-row canvas { width: 100%; height: 100%; display: block; }
+
+/* Apgar strip in live monitor */
+#ip-live-apgar {
+  background: #0d0d00;
+  border-top: 1px solid #122b50;
+  padding: 6px 8px;
+  display: flex; align-items: center; gap: 6px;
+}
+.ip-live-apgar-slot {
+  flex: 1; text-align: center;
+  border-radius: 4px; padding: 3px 2px;
+  border: 1px solid #1a4a7a;
+}
+.ip-live-apgar-slot-time { font-size: 8px; color: #4a7aaa; }
+.ip-live-apgar-slot-val  { font-family: var(--mono); font-size: 16px; line-height: 1; }
+
+/* Right: controls */
+#ip-controls {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.ip-header {
+  background: linear-gradient(135deg, #062244, #0a3566);
+  padding: 12px 16px;
+  display: flex; align-items: center; gap: 12px;
+  border-bottom: 2px solid #222;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Hide live monitor on very small screens, show toggle btn */
+@media (max-width: 640px) {
+  #ip-live-monitor { display: none; }
+  #ip-live-monitor.show { display: flex; position: fixed; inset: 0; z-index: 50; width: 100vw; }
+}
+@media (min-width: 1200px) {
+  #ip-live-monitor { width: 400px; }
+}
+.ip-logo { font-family: var(--mono); font-size: 14px; color: #6aaad4; letter-spacing: 2px; }
+.ip-badge { font-size: 11px; font-weight: 700; background: #0a2d5a; color: #66aaff; border-radius: 6px; padding: 3px 10px; letter-spacing: 1px; }
+.ip-nav { margin-left: auto; display: flex; gap: 8px; }
+.ip-nav-btn {
+  font-family: var(--ui); font-size: 12px; font-weight: 700;
+  border: 1px solid #1e5080; border-radius: 8px; padding: 7px 14px;
+  cursor: pointer; color: #6aaad4; background: #122b50; letter-spacing: 0.5px;
+  transition: all 0.15s;
+}
+.ip-nav-btn:hover { color: #e8f4ff; border-color: #4a7aaa; }
+.ip-nav-btn.active { background: #002244; color: #4488ff; border-color: #2266cc; }
+.ip-section { padding: 20px; max-width: 900px; margin: 0 auto; }
+.ip-card {
+  background: #0e2850; border: 1px solid #1e4878; border-radius: 14px;
+  padding: 18px; margin-bottom: 14px;
+}
+.ip-card-title {
+  font-size: 12px; font-weight: 700; letter-spacing: 1.5px;
+  color: #5588bb; text-transform: uppercase; margin-bottom: 14px;
+  display: flex; align-items: center; gap: 8px;
+}
+.ip-card-title::before { content:''; display:block; width:3px; height:14px; border-radius:2px; background:var(--accent,#4488ff); }
+
+/* Vitals grid in instructor */
+.ip-vitals-grid { display: grid; grid-template-columns: repeat(2,1fr); gap: 10px; }
+.ip-vital-row { display: flex; flex-direction: column; gap: 6px; }
+.ip-vital-label { font-size: 10px; font-weight: 700; letter-spacing: 1px; }
+.ip-vital-ctrl { display: flex; align-items: center; gap: 10px; }
+.ip-vital-ctrl input[type=range] {
+  flex: 1; -webkit-appearance: none; height: 5px;
+  border-radius: 3px; cursor: pointer;
+}
+.ip-vital-val { font-family: var(--mono); font-size: 14px; min-width: 46px; text-align: right; color: #ccc; }
+
+/* Scenarios in instructor */
+/* ip-scen CSS removed */
+
+/* Apgar in instructor */
+.ip-apgar-grid { display: grid; grid-template-columns: repeat(5,1fr); gap: 8px; }
+.ip-apgar-slot {
+  background: #122b50; border: 1px solid #1a4a7a;
+  border-radius: 10px; padding: 10px 8px; text-align: center;
+}
+.ip-apgar-slot.locked { opacity: 0.4; }
+.ip-apgar-slot.ready { border-color: #ffcc00; background: #1a1500; }
+.ip-apgar-slot.done { border-color: #00aa33; background: #001500; }
+.ip-apgar-slot-time { font-size: 10px; font-weight: 700; color: #6aaad4; margin-bottom: 6px; letter-spacing: 1px; }
+.ip-apgar-score { font-family: var(--mono); font-size: 30px; color: #e8f4ff; line-height: 1; }
+.ip-apgar-slot.done .ip-apgar-score { color: #00ff44; }
+.ip-apgar-slot.locked .ip-apgar-score { color: #333; }
+.ip-apgar-slot.ready .ip-apgar-score { color: #ffcc00; }
+.ip-apgar-btn {
+  margin-top: 6px; font-family: var(--ui); font-size: 10px; font-weight: 700;
+  border: 1px solid #1e5080; border-radius: 6px; padding: 5px 8px;
+  cursor: pointer; background: #0d2548; color: #5588bb; width: 100%;
+  transition: all 0.15s;
+}
+.ip-apgar-slot.ready .ip-apgar-btn { background: #1a1000; color: #ffaa00; border-color: #664400; }
+.ip-apgar-slot.done .ip-apgar-btn  { background: #001500; color: #00aa33; border-color: #004400; }
+
+/* Alarm config table */
+.ip-alarm-table { width: 100%; border-collapse: collapse; }
+.ip-alarm-table th { font-size: 10px; font-weight: 700; color: #4a7aaa; letter-spacing: 1px; text-align: left; padding: 6px 10px; border-bottom: 1px solid #1a4070; }
+.ip-alarm-table td { padding: 8px 10px; border-bottom: 1px solid #122b50; vertical-align: middle; }
+.ip-alarm-input {
+  width: 80px; background: #0a2040; border: 1px solid #1e5080;
+  border-radius: 6px; padding: 6px 8px; color: #e8f4ff;
+  font-family: var(--mono); font-size: 14px; text-align: center;
+  -webkit-appearance: none;
+}
+.ip-alarm-input:focus { outline: none; border-color: #ff4444; }
+.ip-alarm-toggle {
+  width: 32px; height: 18px; border-radius: 9px; border: none;
+  cursor: pointer; position: relative; transition: background 0.2s;
+  flex-shrink: 0;
+}
+.ip-alarm-toggle.on { background: #00aa33; }
+.ip-alarm-toggle.off { background: #333; }
+
+/* Apgar history */
+.ip-apgar-history { margin-top: 12px; }
+.ip-apgar-history-row {
+  display: grid; grid-template-columns: 60px 36px 1fr;
+  gap: 10px; padding: 8px 10px; border-bottom: 1px solid #122b50;
+  align-items: center; font-size: 12px;
+}
+.ip-apgar-history-row:last-child { border-bottom: none; }
+.iph-time { font-family: var(--mono); color: #6aaad4; }
+.iph-score { font-family: var(--mono); font-size: 20px; font-weight: 400; }
+.iph-detail { font-size: 11px; color: #4a7aaa; }
+</style>
+</head>
+<body>
+<!-- Rotate overlay para portrait en móvil -->
+<div id="rotate-overlay">
+  <div class="rotate-icon">📱</div>
+  <div class="rotate-text">Girá el dispositivo</div>
+  <div class="rotate-sub">NeoMonitor funciona en modo horizontal</div>
+</div>
+
+<!-- MODE SELECTOR (shown on first load) -->
+<div id="mode-selector" style="position:fixed;inset:0;z-index:300;background:#071528;display:flex;align-items:center;justify-content:center;font-family:'Rajdhani',sans-serif;">
+  <div style="width:min(480px,95vw);padding:0">
+
+    <!-- Logo -->
+    <div style="text-align:center;margin-bottom:28px">
+      <div style="font-family:'Share Tech Mono',monospace;font-size:11px;color:#3d6a9a;letter-spacing:3px;margin-bottom:8px">NEOMONITOR SIM</div>
+      <div style="font-size:22px;font-weight:700;color:#fff;line-height:1.2">Área de RCP Neonatal</div>
+      <div style="font-size:14px;color:#4488ff;font-weight:700;margin-top:4px;letter-spacing:0.5px">CEFEN · SAP</div>
+    </div>
+
+    <!-- STEP 1: Choose role (shown first) -->
+    <div id="step-role">
+      <div style="font-size:12px;font-weight:700;color:#4a7aaa;letter-spacing:1.5px;text-align:center;margin-bottom:16px">ELEGÍ TU ROL</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div onclick="chooseRole('instructor')"
+          style="background:#1a0a0a;border:2px solid #440000;border-radius:14px;padding:22px 16px;cursor:pointer;text-align:center;transition:all 0.15s"
+          onmouseover="this.style.borderColor='#cc3300'" onmouseout="this.style.borderColor='#440000'">
+          <div style="font-size:34px;margin-bottom:8px">🎛️</div>
+          <div style="font-size:17px;font-weight:700;color:#ff6644;margin-bottom:6px">Instructor</div>
+          <div style="font-size:11px;color:#664433;line-height:1.5">Sala de mandos.<br>Crea la sala, controla<br>vitales y alarmas.</div>
+        </div>
+        <div onclick="chooseRole('monitor')"
+          style="background:#0a1a0a;border:2px solid #004400;border-radius:14px;padding:22px 16px;cursor:pointer;text-align:center;transition:all 0.15s"
+          onmouseover="this.style.borderColor='#00aa33'" onmouseout="this.style.borderColor='#004400'">
+          <div style="font-size:34px;margin-bottom:8px">🖥️</div>
+          <div style="font-size:17px;font-weight:700;color:#00cc44;margin-bottom:6px">Monitor</div>
+          <div style="font-size:11px;color:#336633;line-height:1.5">Sala de simulación.<br>Muestra señales vitales<br>e ingresa el Apgar.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- STEP 2A: Instructor → crear sala -->
+    <div id="step-instructor" style="display:none">
+      <div style="background:#0d2548;border:1px solid #222;border-radius:14px;padding:22px;text-align:center">
+        <div style="font-size:11px;font-weight:700;color:#ff6644;letter-spacing:1.5px;margin-bottom:14px">INSTRUCTOR — NUEVA SALA</div>
+        <div style="font-size:13px;color:#5588bb;margin-bottom:20px">Presioná <strong style="color:#aaa">Crear sala</strong> para generar un código de 4 letras.<br>Dictáselo al operador del monitor antes de iniciar.</div>
+        <button onclick="crearSala()"
+          style="background:#330000;color:#ff6644;border:1px solid #660000;border-radius:10px;padding:14px 32px;font-family:'Rajdhani',sans-serif;font-weight:700;font-size:16px;cursor:pointer;letter-spacing:1px;width:100%;margin-bottom:14px">
+          + Crear sala nueva
+        </button>
+
+        <!-- After creation: shows code -->
+        <div id="sala-creada" style="display:none">
+          <div style="font-size:11px;color:#664400;font-weight:700;letter-spacing:1px;margin-bottom:8px">CÓDIGO DE SALA</div>
+          <div id="sala-codigo-display"
+            style="font-family:'Share Tech Mono',monospace;font-size:54px;font-weight:400;color:#ffcc00;letter-spacing:12px;padding:16px;background:#0a2040;border-radius:10px;border:2px dashed #443300;margin-bottom:14px">
+            ----
+          </div>
+          <div style="font-size:12px;color:#4a7aaa;margin-bottom:18px">Dictá este código al operador del monitor</div>
+          <button onclick="entrarComoInstructor()"
+            style="background:#003300;color:#00ff44;border:1px solid #006600;border-radius:10px;padding:14px 32px;font-family:'Rajdhani',sans-serif;font-weight:700;font-size:16px;cursor:pointer;letter-spacing:1px;width:100%">
+            Entrar como Instructor →
+          </button>
+        </div>
+
+        <button onclick="volverAlRol()"
+          style="background:none;border:none;color:#3d6a9a;font-family:'Rajdhani',sans-serif;font-size:13px;cursor:pointer;margin-top:8px;width:100%">
+          ← Cambiar rol
+        </button>
+      </div>
+    </div>
+
+    <!-- STEP 2B: Monitor → ingresar código -->
+    <div id="step-monitor" style="display:none">
+      <div style="background:#0d2548;border:1px solid #222;border-radius:14px;padding:22px;text-align:center">
+        <div style="font-size:11px;font-weight:700;color:#00cc44;letter-spacing:1.5px;margin-bottom:14px">MONITOR — INGRESAR SALA</div>
+        <div style="font-size:13px;color:#5588bb;margin-bottom:20px">Ingresá el código de 4 letras que te dio el instructor.</div>
+
+        <!-- 4-letter input blocks -->
+        <div style="display:flex;gap:10px;justify-content:center;margin-bottom:18px" id="code-boxes">
+          <input id="cb0" maxlength="1" oninput="codeInput(0,this)" onkeydown="codeKey(0,event)"
+            style="width:60px;height:70px;text-align:center;font-family:'Share Tech Mono',monospace;font-size:32px;font-weight:400;color:#00ff44;background:#0a2040;border:2px solid #333;border-radius:10px;text-transform:uppercase;-webkit-appearance:none;outline:none"
+            onfocus="this.style.borderColor='#00aa33'" onblur="this.style.borderColor='#333'">
+          <input id="cb1" maxlength="1" oninput="codeInput(1,this)" onkeydown="codeKey(1,event)"
+            style="width:60px;height:70px;text-align:center;font-family:'Share Tech Mono',monospace;font-size:32px;font-weight:400;color:#00ff44;background:#0a2040;border:2px solid #333;border-radius:10px;text-transform:uppercase;-webkit-appearance:none;outline:none"
+            onfocus="this.style.borderColor='#00aa33'" onblur="this.style.borderColor='#333'">
+          <input id="cb2" maxlength="1" oninput="codeInput(2,this)" onkeydown="codeKey(2,event)"
+            style="width:60px;height:70px;text-align:center;font-family:'Share Tech Mono',monospace;font-size:32px;font-weight:400;color:#00ff44;background:#0a2040;border:2px solid #333;border-radius:10px;text-transform:uppercase;-webkit-appearance:none;outline:none"
+            onfocus="this.style.borderColor='#00aa33'" onblur="this.style.borderColor='#333'">
+          <input id="cb3" maxlength="1" oninput="codeInput(3,this)" onkeydown="codeKey(3,event)"
+            style="width:60px;height:70px;text-align:center;font-family:'Share Tech Mono',monospace;font-size:32px;font-weight:400;color:#00ff44;background:#0a2040;border:2px solid #333;border-radius:10px;text-transform:uppercase;-webkit-appearance:none;outline:none"
+            onfocus="this.style.borderColor='#00aa33'" onblur="this.style.borderColor='#333'">
+        </div>
+
+        <div id="code-error" style="font-size:12px;color:#ff4444;margin-bottom:12px;min-height:18px"></div>
+
+        <button onclick="unirseMonitor()"
+          style="background:#003300;color:#00ff44;border:1px solid #006600;border-radius:10px;padding:14px 32px;font-family:'Rajdhani',sans-serif;font-weight:700;font-size:16px;cursor:pointer;letter-spacing:1px;width:100%">
+          Conectar monitor →
+        </button>
+
+        <button onclick="volverAlRol()"
+          style="background:none;border:none;color:#3d6a9a;font-family:'Rajdhani',sans-serif;font-size:13px;cursor:pointer;margin-top:10px;width:100%">
+          ← Cambiar rol
+        </button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- apgar panel moved into params sidebar -->
+
+<!-- APGAR MODAL -->
+<div id="apgar-modal-overlay">
+  <div id="apgar-modal">
+    <div class="am-header">
+      <div>
+        <div class="am-title">PUNTAJE APGAR</div>
+        <div style="font-size:11px;color:#6aaad4;margin-top:3px">Evaluación neonatal</div>
+      </div>
+      <div class="am-minute" id="apgar-modal-title">1 min</div>
+    </div>
+    <div class="am-body">
+      <div class="am-criteria" id="apgar-criteria"></div>
+      <div class="am-total-row">
+        <div>
+          <div class="am-total-label">PUNTAJE TOTAL</div>
+          <div class="am-total-interp" id="apgar-interp">—</div>
+        </div>
+        <div class="am-total-val" id="apgar-total">—</div>
+      </div>
+    </div>
+    <div class="am-footer">
+      <div class="am-btn am-btn-skip" onclick="skipApgar()">Omitir</div>
+      <div class="am-btn am-btn-confirm" onclick="confirmApgar()">Confirmar</div>
+    </div>
+  </div>
+</div>
+
+<!-- ALARM CONFIG MODAL -->
+<div id="alarm-modal-overlay" onclick="if(event.target===this)closeAlarmModal()">
+  <div id="alarm-modal">
+    <div class="alm-header">
+      <div class="alm-title">⚠ CONFIGURAR ALARMAS</div>
+      <div class="alm-close" onclick="closeAlarmModal()">✕</div>
+    </div>
+    <div class="alm-body" id="alarm-modal-body"></div>
+    <div class="alm-footer">
+      <div class="am-btn am-btn-skip" onclick="closeAlarmModal()">Cancelar</div>
+      <div class="am-btn am-btn-confirm" onclick="saveAlarmModal()">Guardar</div>
+    </div>
+  </div>
+</div>
+
+<!-- INSTRUCTOR PANEL -->
+<div id="instructor-panel">
+<div id="ip-body">
+
+  <!-- LEFT: Live Monitor Preview -->
+  <div id="ip-live-monitor">
+    <div id="ip-live-title">
+      <span>🔴 EN VIVO — SALA DE SIMULACIÓN</span>
+      <div id="ip-live-dot"></div>
+    </div>
+
+    <!-- Numeric params -->
+    <div id="ip-live-params">
+      <div class="ip-live-param">
+        <div class="ip-live-param-name" style="color:#00ff44">FC</div>
+        <div class="ip-live-param-val" style="color:#00ff44" id="iplv-hr">---</div>
+        <div class="ip-live-param-unit">lpm</div>
+      </div>
+      <div class="ip-live-param">
+        <div class="ip-live-param-name" style="color:#00cfff">SpO₂</div>
+        <div class="ip-live-param-val" style="color:#00cfff" id="iplv-spo2">---</div>
+        <div class="ip-live-param-unit">%</div>
+      </div>
+      <div class="ip-live-param">
+        <div class="ip-live-param-name" style="color:#ffff00">FR</div>
+        <div class="ip-live-param-val" style="color:#ffff00" id="iplv-rr">---</div>
+        <div class="ip-live-param-unit">rpm</div>
+      </div>
+      <div class="ip-live-param">
+        <div class="ip-live-param-name" style="color:#ff4dc4">PNI</div>
+        <div style="display:flex;align-items:baseline;gap:3px">
+          <div class="ip-live-param-val" style="color:#ff4dc4;font-size:20px" id="iplv-sys">---</div>
+          <div style="color:#333;font-family:var(--mono);font-size:14px">/</div>
+          <div class="ip-live-param-val" style="color:#ff4dc4;font-size:16px" id="iplv-dia">---</div>
+        </div>
+        <div class="ip-live-param-unit">mmHg</div>
+      </div>
+      <div class="ip-live-param">
+        <div class="ip-live-param-name" style="color:#ff6b6b">TEMP</div>
+        <div class="ip-live-param-val" style="color:#ff6b6b;font-size:20px" id="iplv-temp">---</div>
+        <div class="ip-live-param-unit">°C</div>
+      </div>
+      <div class="ip-live-param">
+        <div class="ip-live-param-name" style="color:#ff9500">EtCO₂</div>
+        <div class="ip-live-param-val" style="color:#ff9500;font-size:20px" id="iplv-etco2">---</div>
+        <div class="ip-live-param-unit">mmHg</div>
+      </div>
+    </div>
+
+    <!-- Waveforms -->
+    <div id="ip-live-waves">
+      <div class="ip-wave-row">
+        <div class="ip-wave-label" style="color:#00ff44">II</div>
+        <canvas id="iplv-cv-ecg"></canvas>
+      </div>
+      <div class="ip-wave-row">
+        <div class="ip-wave-label" style="color:#00cfff">SpO₂</div>
+        <canvas id="iplv-cv-spo2"></canvas>
+      </div>
+      <div class="ip-wave-row">
+        <div class="ip-wave-label" style="color:#ffff00">RESP</div>
+        <canvas id="iplv-cv-resp"></canvas>
+      </div>
+      <div class="ip-wave-row">
+        <div class="ip-wave-label" style="color:#ff9500">EtCO₂</div>
+        <canvas id="iplv-cv-etco2"></canvas>
+      </div>
+    </div>
+
+    <!-- Apgar strip -->
+    <div id="ip-live-apgar">
+      <div style="font-size:8px;font-weight:700;color:#664400;letter-spacing:1px;margin-right:4px">APGAR</div>
+      <div class="ip-live-apgar-slot" id="iplv-apgar-1">
+        <div class="ip-live-apgar-slot-time">1'</div>
+        <div class="ip-live-apgar-slot-val" style="color:#333" id="iplv-apgar-val-1">—</div>
+      </div>
+      <div class="ip-live-apgar-slot" id="iplv-apgar-5">
+        <div class="ip-live-apgar-slot-time">5'</div>
+        <div class="ip-live-apgar-slot-val" style="color:#333" id="iplv-apgar-val-5">—</div>
+      </div>
+      <div class="ip-live-apgar-slot" id="iplv-apgar-10">
+        <div class="ip-live-apgar-slot-time">10'</div>
+        <div class="ip-live-apgar-slot-val" style="color:#333" id="iplv-apgar-val-10">—</div>
+      </div>
+      <div class="ip-live-apgar-slot" id="iplv-apgar-15">
+        <div class="ip-live-apgar-slot-time">15'</div>
+        <div class="ip-live-apgar-slot-val" style="color:#333" id="iplv-apgar-val-15">—</div>
+      </div>
+      <div class="ip-live-apgar-slot" id="iplv-apgar-20">
+        <div class="ip-live-apgar-slot-time">20'</div>
+        <div class="ip-live-apgar-slot-val" style="color:#333" id="iplv-apgar-val-20">—</div>
+      </div>
+    </div>
+
+    <!-- Scenario + timer strip -->
+    <div style="background:#0a1e3a;border-top:1px solid #122b50;padding:8px 10px;display:flex;align-items:center;justify-content:space-between">
+      <div style="font-size:10px;font-weight:700;color:#ff9500" id="iplv-scenario">● SIMULACIÓN</div>
+      <div style="font-family:var(--mono);font-size:18px;color:#ffcc00" id="iplv-timer">00:00</div>
+      <div id="iplv-status" style="font-size:9px;color:#3d6a9a;letter-spacing:1px">EN ESPERA</div>
+    </div>
+  </div>
+
+  <!-- RIGHT: Controls -->
+  <div id="ip-controls">
+    <div class="ip-header">
+    <div class="ip-logo">NEOMONITOR SIM</div>
+    <div class="ip-badge">PANEL INSTRUCTOR</div>
+    <div class="ip-nav">
+      <div class="ip-nav-btn active" id="ipnav-vitals" onclick="ipNav('vitals')">Vitales</div>
+      <div class="ip-nav-btn" id="ipnav-alarmas" onclick="ipNav('alarmas')">Alarmas</div>
+      <div class="ip-nav-btn" id="ipnav-apgar" onclick="ipNav('apgar')">Apgar</div>
+      <div class="ip-nav-btn" onclick="finalizarReanimacion()" style="background:#330000;color:#ff4444;border-color:#660000">⏹ Finalizar</div>
+      <div class="ip-nav-btn" onclick="goToMonitorView()" style="background:#001500;color:#00cc44;border-color:#005500">→ Ver monitor</div>
+    </div>
+  </div>
+
+  <!-- TAB: VITALES -->
+  <div class="ip-section" id="iptab-vitals">
+
+    <!-- BRIEF DEL CASO — se completa ANTES de iniciar -->
+    <div class="ip-card" style="border-color:#1e5080">
+      <div class="ip-card-title" style="--accent:#4488ff">DATOS DEL CASO — COMPLETAR ANTES DE INICIAR</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div>
+          <label style="font-size:10px;font-weight:700;color:#6aaad4;letter-spacing:1px;display:block;margin-bottom:5px">TIPO DE ESCENARIO</label>
+          <input id="pre-scenario" placeholder="Ej.: Depresión neonatal severa"
+            style="width:100%;background:#081c38;border:1px solid #1e5080;border-radius:7px;padding:9px 11px;color:#e8f4ff;font-family:'Rajdhani',sans-serif;font-size:14px">
+        </div>
+        <div>
+          <label style="font-size:10px;font-weight:700;color:#6aaad4;letter-spacing:1px;display:block;margin-bottom:5px">CENTRO</label>
+          <input id="pre-center" placeholder="Ej.: Hospital Garrahan"
+            style="width:100%;background:#081c38;border:1px solid #1e5080;border-radius:7px;padding:9px 11px;color:#e8f4ff;font-family:'Rajdhani',sans-serif;font-size:14px">
+        </div>
+        <div>
+          <label style="font-size:10px;font-weight:700;color:#6aaad4;letter-spacing:1px;display:block;margin-bottom:5px">FECHA Y HORA</label>
+          <input id="pre-datetime" type="datetime-local"
+            style="width:100%;background:#081c38;border:1px solid #1e5080;border-radius:7px;padding:9px 11px;color:#e8f4ff;font-family:'Rajdhani',sans-serif;font-size:14px">
+        </div>
+        <div style="grid-column:1/-1">
+          <label style="font-size:10px;font-weight:700;color:#6aaad4;letter-spacing:1px;display:block;margin-bottom:5px">OBJETIVOS / BRIEF</label>
+          <textarea id="pre-objectives" rows="2" placeholder="Objetivos de aprendizaje, contexto clínico, puntos a evaluar..."
+            style="width:100%;background:#081c38;border:1px solid #1e5080;border-radius:7px;padding:9px 11px;color:#e8f4ff;font-family:'Rajdhani',sans-serif;font-size:13px;resize:vertical"></textarea>
+        </div>
+      </div>
+    </div>
+
+    <div class="ip-card">
+      <div class="ip-card-title" style="--accent:#00ff44">PARÁMETROS VITALES</div>
+      <div class="ip-vitals-grid" id="ip-vitals-grid"></div>
+    </div>
+
+    <div class="ip-card">
+      <div class="ip-card-title" style="--accent:#ffcc00">CRONÓMETRO REANIMACIÓN</div>
+      <div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap">
+        <div style="font-family:var(--mono);font-size:52px;color:#ffcc00" id="ip-timer-display">00:00</div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <div class="am-btn am-btn-confirm" id="ip-btn-start" onclick="ipTimerToggle()" style="text-align:center;min-width:100px">INICIAR</div>
+          <div class="am-btn am-btn-skip" onclick="timerReset();ipSyncTimer()" style="text-align:center">RESET</div>
+        </div>
+        <div>
+          <div class="am-btn" style="background:#1a1000;color:#ffaa00;border-color:#664400;border:1px solid;border-radius:8px;padding:8px 14px;cursor:pointer;margin-bottom:6px;font-family:var(--ui);font-weight:700;font-size:13px" onclick="timerMark()">MARCAR EVENTO</div>
+          <div id="ip-events" style="max-height:80px;overflow-y:auto;display:flex;flex-direction:column;gap:3px"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- INTERVENCIONES ILCOR 2025 — siempre visible -->
+    <div class="ip-card">
+      <div class="ip-card-title" style="--accent:#ff9500">INTERVENCIONES — RCP NEONATAL ILCOR 2025</div>
+      <div id="ip-interv-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px"></div>
+      <div style="padding-top:10px;border-top:1px solid #122b50;display:flex;gap:8px">
+        <input id="ip-interv-free" placeholder="Intervención libre..." style="flex:1;background:#0a2040;border:1px solid #333;border-radius:8px;padding:9px 12px;color:#fff;font-family:'Rajdhani',sans-serif;font-size:14px" onkeydown="if(event.key==='Enter')addFreeInterv()">
+        <button onclick="addFreeInterv()" style="background:#1a1000;color:#ffaa00;border:1px solid #664400;border-radius:8px;padding:9px 14px;font-family:'Rajdhani',sans-serif;font-weight:700;font-size:13px;cursor:pointer;white-space:nowrap">+ Libre</button>
+      </div>
+      <div style="margin-top:10px" id="ip-interv-log"></div>
+    </div>
+
+    <!-- FINALIZAR -->
+    <div class="ip-card" style="border-color:#330000">
+      <div style="display:flex;gap:10px;align-items:center">
+        <button onclick="finalizarReanimacion()" style="flex:1;background:#0e1e40;color:#ff4444;border:1px solid #550000;border-radius:10px;padding:13px;font-family:'Rajdhani',sans-serif;font-weight:700;font-size:15px;cursor:pointer;letter-spacing:1px">⏹ FINALIZAR REANIMACIÓN</button>
+        <button onclick="fullReset()" style="background:#0d2548;color:#6aaad4;border:1px solid #333;border-radius:10px;padding:13px 16px;font-family:'Rajdhani',sans-serif;font-weight:700;font-size:13px;cursor:pointer;white-space:nowrap">🔄 Nueva sim.</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB: ALARMAS -->
+  <div class="ip-section" id="iptab-alarmas" style="display:none">
+    <div class="ip-card">
+      <div class="ip-card-title" style="--accent:#ff4444">LÍMITES DE ALARMA</div>
+      <table class="ip-alarm-table" id="ip-alarm-table"></table>
+      <div style="margin-top:14px;display:flex;gap:10px">
+        <div class="am-btn am-btn-confirm" onclick="saveAlarmsFromInstructor()">Aplicar al monitor</div>
+        <div class="am-btn am-btn-skip" onclick="resetAlarmDefaults()">Restaurar valores</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB: APGAR -->
+  <div class="ip-section" id="iptab-apgar" style="display:none">
+    <div class="ip-card">
+      <div class="ip-card-title" style="--accent:#ffcc00">EVALUACIONES APGAR</div>
+      <div style="font-size:12px;color:#4a7aaa;margin-bottom:14px">El Apgar se habilita automáticamente al llegar al minuto correspondiente. También podés cargarlo manualmente.</div>
+      <div class="ip-apgar-grid" id="ip-apgar-grid"></div>
+      <div class="ip-apgar-history" id="ip-apgar-history"></div>
+    </div>
+    </div><!-- end ip-section apgar -->
+    </div><!-- end ip-controls scroll area -->
+  </div><!-- end ip-controls -->
+</div><!-- end ip-body -->
+</div><!-- end instructor-panel -->
+
+<div id="monitor">
+
+  <!-- TOP BAR -->
+  <div id="topbar">
+    <div class="tb-logo">NEOMONITOR SIM</div>
+    <div class="tb-mode" id="tb-mode">● SIMULACIÓN</div>
+    <div style="margin-left:auto;display:flex;gap:16px;align-items:center">
+      <div class="tb-date" id="tb-date"></div>
+      <div class="tb-time" id="tb-clock"></div>
+    </div>
+  </div>
+
+  <!-- WAVEFORMS -->
+  <div id="waveforms">
+    <div class="wave-row" id="row-ecg">
+      <div class="wave-label">
+        <div class="wl-name" style="color:var(--ecg)">II</div>
+        <div class="wl-speed">25 mm/s</div>
+      </div>
+      <div class="wave-canvas-wrap"><canvas class="wave" id="cv-ecg"></canvas></div>
+    </div>
+    <div class="wave-row" id="row-spo2">
+      <div class="wave-label">
+        <div class="wl-name" style="color:var(--spo2)">SpO₂</div>
+        <div class="wl-speed">pleti</div>
+      </div>
+      <div class="wave-canvas-wrap"><canvas class="wave" id="cv-spo2"></canvas></div>
+    </div>
+    <div class="wave-row" id="row-resp">
+      <div class="wave-label">
+        <div class="wl-name" style="color:var(--resp)">RESP</div>
+        <div class="wl-speed">6.25mm/s</div>
+      </div>
+      <div class="wave-canvas-wrap"><canvas class="wave" id="cv-resp"></canvas></div>
+    </div>
+    <div class="wave-row" id="row-etco2">
+      <div class="wave-label">
+        <div class="wl-name" style="color:var(--etco2)">EtCO₂</div>
+        <div class="wl-speed">capno</div>
+      </div>
+      <div class="wave-canvas-wrap"><canvas class="wave" id="cv-etco2"></canvas></div>
+    </div>
+  </div>
+
+  <!-- PARAMS PANEL -->
+  <div id="params">
+
+    <div class="param-box" style="background:#071a35" onclick="openCtrl('hr')">
+      <div class="alarm-indicator" id="alarm-hr"></div>
+      <div class="param-name" style="color:var(--ecg)">FC</div>
+      <div class="param-value" style="font-size:44px;color:var(--ecg)" id="val-hr">---</div>
+      <div class="param-unit">lpm</div>
+      <div class="param-limits"><span id="lim-hr-lo">60</span><span>|</span><span id="lim-hr-hi">200</span></div>
+    </div>
+
+    <div class="param-box" style="background:#081d3a" onclick="openCtrl('spo2')">
+      <div class="alarm-indicator" id="alarm-spo2"></div>
+      <div class="param-name" style="color:var(--spo2)">SpO₂</div>
+      <div class="param-value" style="font-size:38px;color:var(--spo2)" id="val-spo2">---</div>
+      <div class="param-unit">%</div>
+      <div class="param-limits"><span id="lim-spo2-lo">88</span><span>|</span><span id="lim-spo2-hi">100</span></div>
+    </div>
+
+    <div class="param-box" style="background:#0e2040" onclick="openCtrl('rr')">
+      <div class="alarm-indicator" id="alarm-rr"></div>
+      <div class="param-name" style="color:var(--resp)">FR</div>
+      <div class="param-value" style="font-size:34px;color:var(--resp)" id="val-rr">---</div>
+      <div class="param-unit">rpm</div>
+      <div class="param-limits"><span id="lim-rr-lo">30</span><span>|</span><span id="lim-rr-hi">80</span></div>
+    </div>
+
+    <div class="param-box" onclick="openCtrl('nbp')">
+      <div class="alarm-indicator" id="alarm-nbp"></div>
+      <div class="param-name" style="color:var(--nbp)">PNI</div>
+      <div style="display:flex;align-items:baseline;gap:4px">
+        <div class="param-value" style="font-size:28px;color:var(--nbp)" id="val-sys">---</div>
+        <div style="color:#4a7aaa;font-family:var(--mono);font-size:18px">/</div>
+        <div class="param-value" style="font-size:22px;color:var(--nbp)" id="val-dia">---</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <div class="param-value" style="font-size:18px;color:var(--nbp)" id="val-map">---</div>
+        <div class="param-unit">mmHg</div>
+      </div>
+    </div>
+
+    <div class="param-box" onclick="openCtrl('temp')">
+      <div class="alarm-indicator" id="alarm-temp"></div>
+      <div class="param-name" style="color:var(--temp)">TEMP</div>
+      <div class="param-value" style="font-size:32px;color:var(--temp)" id="val-temp">---</div>
+      <div class="param-unit">°C</div>
+      <div class="param-limits"><span id="lim-temp-lo">36.0</span><span>|</span><span id="lim-temp-hi">37.5</span></div>
+    </div>
+
+    <div class="param-box" style="background:#0e1f40" onclick="openCtrl('etco2')">
+      <div class="alarm-indicator" id="alarm-etco2"></div>
+      <div class="param-name" style="color:var(--etco2)">EtCO₂</div>
+      <div class="param-value" style="font-size:34px;color:var(--etco2)" id="val-etco2">---</div>
+      <div class="param-unit">mmHg</div>
+      <div class="param-limits"><span id="lim-etco2-lo">35</span><span>|</span><span id="lim-etco2-hi">45</span></div>
+    </div>
+
+    <!-- APGAR integrated in params panel -->
+    <div class="apgar-params-box">
+      <div class="apgar-params-title">APGAR</div>
+      <div class="apgar-row" id="apgar-row">
+        <div class="apgar-slot locked" id="apgar-slot-1"  onclick="onMonitorApgarClick(1)">
+          <div class="apgar-slot-time">1'</div>
+          <div class="apgar-slot-score" id="apgar-val-1">—</div>
+        </div>
+        <div class="apgar-slot locked" id="apgar-slot-5"  onclick="onMonitorApgarClick(5)">
+          <div class="apgar-slot-time">5'</div>
+          <div class="apgar-slot-score" id="apgar-val-5">—</div>
+        </div>
+        <div class="apgar-slot locked" id="apgar-slot-10" onclick="onMonitorApgarClick(10)">
+          <div class="apgar-slot-time">10'</div>
+          <div class="apgar-slot-score" id="apgar-val-10">—</div>
+        </div>
+        <div class="apgar-slot locked" id="apgar-slot-15" onclick="onMonitorApgarClick(15)">
+          <div class="apgar-slot-time">15'</div>
+          <div class="apgar-slot-score" id="apgar-val-15">—</div>
+        </div>
+        <div class="apgar-slot locked" id="apgar-slot-20" onclick="onMonitorApgarClick(20)">
+          <div class="apgar-slot-time">20'</div>
+          <div class="apgar-slot-score" id="apgar-val-20">—</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- BOTTOM BAR -->
+  <div id="bottombar">
+
+    <!-- CRONÓMETRO -->
+    <div id="timer-section">
+      <div>
+        <div class="timer-label">REANIMACIÓN</div>
+        <div id="timer-display">00:00</div>
+      </div>
+      <div class="timer-btns">
+        <div class="tbtn" id="btn-start" onclick="timerToggle()">INICIAR</div>
+        <div class="tbtn" id="btn-reset" onclick="timerReset()">RESET</div>
+      </div>
+      <div>
+        <div class="tbtn" id="btn-mark" onclick="timerMark()" style="margin-bottom:4px">MARCAR</div>
+        <div class="tbtn" onclick="openIntervModal()" style="background:#1a0e00;color:#ff9500;border-color:#553300;font-size:10px;margin-top:4px">⚡ RCP 2025</div>
+        <div class="timer-events" id="timer-events"></div>
+      </div>
+    </div>
+
+    <!-- APGAR STATUS (monitor bottom bar) — replaces scenario names -->
+    <div id="scenarios-section" style="flex:1;display:flex;align-items:center;gap:14px;padding:0 18px">
+      <div class="sec-label">APGAR</div>
+      <div style="display:flex;gap:10px;align-items:center" id="apgar-bottombar-status">
+        <!-- populated by JS -->
+      </div>
+      <div style="margin-left:auto;font-size:11px;color:#3d6a9a;font-family:var(--mono)" id="apgar-bottombar-hint">
+        Los slots se habilitan al llegar cada minuto
+      </div>
+    </div>
+
+    <!-- FINALIZAR BTN (monitor) -->
+    <div onclick="finalizarReanimacion()"
+      style="height:100%;padding:0 14px;display:flex;align-items:center;justify-content:center;cursor:pointer;background:#0d2548;border-left:1px solid var(--border);font-size:10px;font-weight:700;color:#ff4444;letter-spacing:1px;flex-direction:column;gap:4px;min-width:56px;transition:background 0.15s"
+      onmouseover="this.style.background='#1a0000'" onmouseout="this.style.background='#111'">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+      <span>FINAL</span>
+    </div>
+
+    <!-- ALARM BTN -->
+    <div id="alarm-config-btn" onclick="openAlarmModal()"
+      style="height:100%;padding:0 14px;display:flex;align-items:center;justify-content:center;cursor:pointer;background:#0d2548;border-left:1px solid var(--border);font-size:10px;font-weight:700;color:#ff4444;letter-spacing:1px;flex-direction:column;gap:4px;min-width:56px;transition:background 0.15s"
+      onmouseover="this.style.background='#1a0000'" onmouseout="this.style.background='#111'">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"/>
+      </svg>
+      <span>ALARMA</span>
+    </div>
+
+    <!-- PANEL TOGGLE -->
+    <div id="ctrl-toggle" onclick="toggleCtrlPanel()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <circle cx="12" cy="12" r="3"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2m-3.5-7.5-1.5 1.5M7 7 5.5 5.5M17 17l1.5 1.5M7 17 5.5 18.5"/>
+      </svg>
+      <span>CTRL</span>
+    </div>
+
+  </div>
+</div>
+
+<!-- ALARM BANNER -->
+<div id="alarm-banner" onclick="silenceAlarm()">
+  <span>⚠</span>
+  <span id="alarm-text">ALARMA</span>
+  <span style="margin-left:auto;font-size:10px;color:rgba(255,255,255,0.7)">toque para silenciar</span>
+</div>
+
+<!-- FULLSCREEN -->
+<button id="fs-btn" onclick="toggleFS()" title="Pantalla completa">⛶</button>
+
+<!-- CONTROL PANEL -->
+<div id="ctrl-panel">
+  <div class="cp-header">
+    <span>AJUSTE MANUAL DE PARÁMETROS</span>
+    <span class="cp-close" onclick="toggleCtrlPanel()">✕</span>
+  </div>
+
+  <!-- FC -->
+  <div class="cp-param" id="cp-hr">
+    <div class="cp-param-name" style="color:var(--ecg)">FC — Frecuencia Cardíaca (lpm)</div>
+    <div class="cp-row">
+      <input type="range" id="sl-hr" min="0" max="250" step="1" value="140"
+        style="accent-color:var(--ecg)" oninput="updateParam('hr',this.value)">
+      <span class="cp-val" id="cpv-hr">140</span>
+    </div>
+    <div class="cp-alarms">
+      <div class="cp-alarm-btn" style="border-color:#005500;color:#00cc44;background:#001500"
+        onclick="setAlarmLimit('hr','lo',prompt('Límite bajo FC:',limites.hr.lo)||limites.hr.lo)">Lo: <span id="al-hr-lo">60</span></div>
+      <div class="cp-alarm-btn" style="border-color:#550000;color:#cc4444;background:#150000"
+        onclick="setAlarmLimit('hr','hi',prompt('Límite alto FC:',limites.hr.hi)||limites.hr.hi)">Hi: <span id="al-hr-hi">200</span></div>
+    </div>
+  </div>
+
+  <!-- SpO2 -->
+  <div class="cp-param" id="cp-spo2">
+    <div class="cp-param-name" style="color:var(--spo2)">SpO₂ (%)</div>
+    <div class="cp-row">
+      <input type="range" id="sl-spo2" min="50" max="100" step="1" value="95"
+        style="accent-color:var(--spo2)" oninput="updateParam('spo2',this.value)">
+      <span class="cp-val" id="cpv-spo2">95</span>
+    </div>
+    <div class="cp-alarms">
+      <div class="cp-alarm-btn" style="border-color:#005555;color:#00aacc;background:#001520"
+        onclick="setAlarmLimit('spo2','lo',prompt('Límite bajo SpO₂:',limites.spo2.lo)||limites.spo2.lo)">Lo: <span id="al-spo2-lo">88</span></div>
+    </div>
+  </div>
+
+  <!-- FR -->
+  <div class="cp-param" id="cp-rr">
+    <div class="cp-param-name" style="color:var(--resp)">FR — Frecuencia Respiratoria (rpm)</div>
+    <div class="cp-row">
+      <input type="range" id="sl-rr" min="0" max="120" step="1" value="40"
+        style="accent-color:var(--resp)" oninput="updateParam('rr',this.value)">
+      <span class="cp-val" id="cpv-rr">40</span>
+    </div>
+    <div class="cp-alarms">
+      <div class="cp-alarm-btn" style="border-color:#555500;color:#aaaa00;background:#151500"
+        onclick="setAlarmLimit('rr','lo',prompt('Límite bajo FR:',limites.rr.lo)||limites.rr.lo)">Lo: <span id="al-rr-lo">30</span></div>
+      <div class="cp-alarm-btn" style="border-color:#555500;color:#aaaa00;background:#151500"
+        onclick="setAlarmLimit('rr','hi',prompt('Límite alto FR:',limites.rr.hi)||limites.rr.hi)">Hi: <span id="al-rr-hi">80</span></div>
+    </div>
+  </div>
+
+  <!-- PAS/PAD -->
+  <div class="cp-param" id="cp-nbp">
+    <div class="cp-param-name" style="color:var(--nbp)">PNI — Sistólica / Diastólica (mmHg)</div>
+    <div class="cp-row">
+      <span style="font-size:10px;color:#5588bb;width:28px">SIS</span>
+      <input type="range" id="sl-sys" min="20" max="120" step="1" value="65"
+        style="accent-color:var(--nbp)" oninput="updateNBP()">
+      <span class="cp-val" id="cpv-sys">65</span>
+    </div>
+    <div class="cp-row" style="margin-top:6px">
+      <span style="font-size:10px;color:#5588bb;width:28px">DIA</span>
+      <input type="range" id="sl-dia" min="10" max="80" step="1" value="40"
+        style="accent-color:var(--nbp)" oninput="updateNBP()">
+      <span class="cp-val" id="cpv-dia">40</span>
+    </div>
+  </div>
+
+  <!-- TEMP -->
+  <div class="cp-param" id="cp-temp">
+    <div class="cp-param-name" style="color:var(--temp)">TEMPERATURA (°C)</div>
+    <div class="cp-row">
+      <input type="range" id="sl-temp" min="32" max="41" step="0.1" value="36.5"
+        style="accent-color:var(--temp)" oninput="updateParam('temp',parseFloat(this.value).toFixed(1))">
+      <span class="cp-val" id="cpv-temp">36.5</span>
+    </div>
+    <div class="cp-alarms">
+      <div class="cp-alarm-btn" style="border-color:#550000;color:#cc4444;background:#150000"
+        onclick="setAlarmLimit('temp','lo',prompt('Límite bajo temp:',limites.temp.lo)||limites.temp.lo)">Lo: <span id="al-temp-lo">36.0</span></div>
+      <div class="cp-alarm-btn" style="border-color:#550000;color:#cc4444;background:#150000"
+        onclick="setAlarmLimit('temp','hi',prompt('Límite alto temp:',limites.temp.hi)||limites.temp.hi)">Hi: <span id="al-temp-hi">37.5</span></div>
+    </div>
+  </div>
+
+  <!-- EtCO2 -->
+  <div class="cp-param" id="cp-etco2">
+    <div class="cp-param-name" style="color:var(--etco2)">EtCO₂ (mmHg)</div>
+    <div class="cp-row">
+      <input type="range" id="sl-etco2" min="0" max="80" step="1" value="38"
+        style="accent-color:var(--etco2)" oninput="updateParam('etco2',this.value)">
+      <span class="cp-val" id="cpv-etco2">38</span>
+    </div>
+    <div class="cp-alarms">
+      <div class="cp-alarm-btn" style="border-color:#553300;color:#cc8800;background:#151000"
+        onclick="setAlarmLimit('etco2','lo',prompt('Límite bajo EtCO₂:',limites.etco2.lo)||limites.etco2.lo)">Lo: <span id="al-etco2-lo">35</span></div>
+      <div class="cp-alarm-btn" style="border-color:#553300;color:#cc8800;background:#151000"
+        onclick="setAlarmLimit('etco2','hi',prompt('Límite alto EtCO₂:',limites.etco2.hi)||limites.etco2.hi)">Hi: <span id="al-etco2-hi">45</span></div>
+    </div>
+  </div>
+
+  <!-- Noise toggle -->
+  <div class="cp-param">
+    <div class="cp-param-name" style="color:#666">OPCIONES DE ONDA</div>
+    <div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap">
+      <div class="cp-alarm-btn" style="border-color:#1e5080;color:#6aaad4;background:#122b50" onclick="toggleArtifact()">Artefacto movimiento</div>
+      <div class="cp-alarm-btn" style="border-color:#1e5080;color:#6aaad4;background:#122b50" onclick="toggleNoise()">Ruido línea</div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ─── STATE ──────────────────────────────────────────────────────
+const vitals = { hr:140, spo2:95, rr:40, sys:65, dia:40, temp:36.5, etco2:38 };
+const limites = {
+  hr:    { lo:60,  hi:200 },
+  spo2:  { lo:88,  hi:100 },
+  rr:    { lo:30,  hi:80  },
+  temp:  { lo:36.0,hi:37.5 },
+  etco2: { lo:35,  hi:45  },
+};
+let artifact = false, noise = false;
+let alarmSilenced = false;
+let activeAlarms = new Set();
+
+// ─── CANVASES ───────────────────────────────────────────────────
+const CVS = {
+  ecg:   { el: null, ctx: null, buf: null, pos: 0, color: '#00ff44' },
+  spo2:  { el: null, ctx: null, buf: null, pos: 0, color: '#00cfff' },
+  resp:  { el: null, ctx: null, buf: null, pos: 0, color: '#ffff00' },
+  etco2: { el: null, ctx: null, buf: null, pos: 0, color: '#ff9500' },
+};
+
+function initCanvases() {
+  for (const [key, cv] of Object.entries(CVS)) {
+    cv.el = document.getElementById('cv-' + key);
+    cv.ctx = cv.el.getContext('2d');
+    resizeCanvas(cv);
+    cv.buf = new Float32Array(cv.el.width).fill(cv.el.height / 2);
+  }
+}
+
+function resizeCanvas(cv) {
+  const wrap = cv.el.parentElement;
+  cv.el.width = wrap.clientWidth;
+  cv.el.height = wrap.clientHeight;
+}
+
+window.addEventListener('resize', () => {
+  for (const cv of Object.values(CVS)) { resizeCanvas(cv); cv.buf = new Float32Array(cv.el.width).fill(cv.el.height/2); }
+});
+
+// ─── WAVEFORM GENERATORS ────────────────────────────────────────
+let ecgPhase = 0, spo2Phase = 0, respPhase = 0, etco2Phase = 0;
+
+// ── ECG DII — morfología clínica real neonatal ──
+// Segmentos basados en duraciones reales (ms escaladas a fracción de período):
+// P: 60ms  PR: 80ms  QRS: 50ms  ST: 80ms  T: 120ms  → total ~390ms @ 140lpm (428ms)
+// Amplitudes neonatales: P=0.15mV  R=1.2mV  Q=-0.2mV  S=-0.4mV  T=0.3mV
+function genECG(t) {
+  if (!monitorStarted) return 0.5;
+  const hr = vitals.hr;
+  if (hr < 5) {
+    // Flatline con pequeño ruido
+    return 0.5 + (noise ? (Math.random()-0.5)*0.008 : 0);
+  }
+  const period = 60.0 / hr;   // segundos por latido
+
+  // Duración fija de cada segmento en segundos (independiente del HR)
+  // En neonatos el QT se acorta con HR pero mantenemos proporciones clínicas
+  const tP    = 0.045;  // duración onda P
+  const tPR   = 0.030;  // segmento PR (isoelec)
+  const tQ    = 0.008;  // onda Q
+  const tR    = 0.018;  // onda R (subida+bajada)
+  const tS    = 0.012;  // onda S
+  const tST   = 0.040;  // segmento ST
+  const tT    = 0.085;  // onda T
+
+  // Inicio de cada componente
+  const startP  = 0.0;
+  const startPR = startP  + tP;
+  const startQ  = startPR + tPR;
+  const startR  = startQ  + tQ;
+  const startS  = startR  + tR;
+  const startST = startS  + tS;
+  const startT  = startST + tST;
+  const endT    = startT  + tT;
+
+  // Fase dentro del ciclo (en segundos, no fracción)
+  const phase = t % period;
+
+  let y = 0;  // mV equivalente normalizado
+
+  if (phase < startPR) {
+    // Onda P — gaussiana suave
+    const pp = (phase - startP) / tP;
+    y = 0.18 * Math.sin(pp * Math.PI);
+  } else if (phase < startQ) {
+    // Segmento PR isoelec
+    y = 0;
+  } else if (phase < startR) {
+    // Onda Q — deflexión negativa
+    const qp = (phase - startQ) / tQ;
+    y = -0.22 * Math.sin(qp * Math.PI);
+  } else if (phase < startS) {
+    // Onda R — pico agudo, subida y bajada
+    const rp = (phase - startR) / tR;
+    // Forma triangular con pico afilado + leve asimetría
+    if (rp < 0.45) {
+      y = (rp / 0.45) * 1.0;
+    } else {
+      y = ((1.0 - rp) / 0.55) * 1.0;
+    }
+    // Pequeña muesca en la bajada (onda r')
+    if (rp > 0.7 && rp < 0.85) y += 0.08 * Math.sin((rp-0.7)/0.15 * Math.PI);
+  } else if (phase < startST) {
+    // Onda S — deflexión negativa tras R
+    const sp = (phase - startS) / tS;
+    y = -0.35 * Math.sin(sp * Math.PI);
+  } else if (phase < startT) {
+    // Segmento ST — leve ascenso hacia T
+    const stp = (phase - startST) / tST;
+    y = 0.02 + 0.04 * stp;
+  } else if (phase < endT) {
+    // Onda T — redondeada, asimétrica (más lenta la bajada)
+    const tp = (phase - startT) / tT;
+    // Asimetría: subida 40%, bajada 60%
+    if (tp < 0.40) {
+      y = 0.28 * Math.sin((tp / 0.40) * Math.PI * 0.5);
+    } else {
+      y = 0.28 * Math.cos(((tp - 0.40) / 0.60) * Math.PI * 0.5);
+    }
+  } else {
+    // Línea isoeléctrica (TP segment)
+    y = 0;
+  }
+
+  // Artefacto de movimiento — spikes aleatorios
+  if (artifact) {
+    if (Math.random() < 0.004) y += (Math.random()-0.5) * 2.5;
+    else y += (Math.random()-0.5) * 0.12;
+  }
+  // Ruido de línea — 50Hz (simulado como ruido fino)
+  if (noise) y += (Math.random()-0.5) * 0.06;
+
+  // Mapear mV → fracción de canvas (centro 0.5, escala 0.32)
+  return 0.5 - y * 0.32;
+}
+
+// ── SpO₂ PLETISMOGRAFÍA — sinusoide con morfología dícrota ──
+// Onda pletismográfica real: ascenso rápido (sístole), descenso suave,
+// muesca dícrota leve, retorno lento a la línea de base
+function genSpO2(t) {
+  if (!monitorStarted) return 0.5;
+  const hr = vitals.hr;
+  if (hr < 5) return 0.5;
+  const period = 60.0 / hr;
+  const phase  = t % period / period;   // 0..1
+
+  // Amplitud proporcional a saturación (menor SpO₂ → pulso más débil)
+  const amp = Math.max(0.05, (vitals.spo2 - 48) / 52) * 0.40;
+
+  let y = 0;
+  // Ascenso sistólico rápido — 0 a 25% del ciclo
+  if (phase < 0.25) {
+    const p = phase / 0.25;
+    // Curva sigmoidea → subida rápida al pico
+    y = amp * (1 / (1 + Math.exp(-12 * (p - 0.5))));
+  }
+  // Descenso diastólico + muesca dícrota
+  else if (phase < 0.55) {
+    const p = (phase - 0.25) / 0.30;
+    // Descenso suave
+    y = amp * (1 - 0.55 * p);
+    // Muesca dícrota a ~35% del descenso
+    if (p > 0.30 && p < 0.50) {
+      const dp = (p - 0.30) / 0.20;
+      y += amp * 0.10 * Math.sin(dp * Math.PI);
+    }
+  }
+  // Onda dícrota pequeña
+  else if (phase < 0.70) {
+    const p = (phase - 0.55) / 0.15;
+    const base = amp * (1 - 0.55 * 0.30 - 0.55 * (phase - 0.25) / 0.30);
+    y = amp * 0.45 * (1 - p) + amp * 0.06 * Math.sin(p * Math.PI);
+  }
+  // Retorno lento a baseline
+  else {
+    const p = (phase - 0.70) / 0.30;
+    y = amp * 0.18 * (1 - p);
+  }
+
+  if (artifact) y += (Math.random()-0.5) * 0.03;
+
+  // Línea base ligeramente sobre el centro (como en monitores reales)
+  return 0.62 - y;
+}
+
+// ── RESPIRACIÓN — sinusoide fisiológica suave ──
+// Onda sinusoidal pura con leve asimetría inspiración/espiración (I:E = 1:1.5)
+function genResp(t) {
+  if (!monitorStarted) return 0.5;
+  const rr = vitals.rr;
+  if (rr < 2) return 0.5;   // apnea → línea plana
+  const period = 60.0 / rr;
+  const phase  = t % period / period;   // 0..1
+
+  // Asimetría I:E = 1:1.5  → inspiración en 40% del ciclo, espiración en 60%
+  const iRatio = 0.40;
+  let y;
+  if (phase < iRatio) {
+    // Inspiración: semiciclo sinusoidal positivo
+    y = Math.sin((phase / iRatio) * Math.PI);
+  } else {
+    // Espiración: semiciclo sinusoidal negativo, más lento
+    y = -0.75 * Math.sin(((phase - iRatio) / (1 - iRatio)) * Math.PI);
+  }
+
+  // Amplitud × 0.38 para que ocupe bien el canal
+  return 0.5 - y * 0.38;
+}
+
+// ── EtCO₂ CAPNOGRAFÍA — señal cuadrada trapezoidal real ──
+// Morfología estándar:
+//   Fase 0: línea base (inspiración)   → CO₂ = 0
+//   Fase I: ascenso abrupto (inicio espiración)
+//   Fase II: plateau alveolar con leve pendiente ascendente
+//   Fase III: caída abrupta (inicio inspiración)
+// El plateau tiene una inclinación positiva (efecto Fowler) típico
+function genEtCO2(t) {
+  if (!monitorStarted) return 0.88;
+  const rr    = vitals.rr;
+  const etco2 = vitals.etco2;
+  if (rr < 2 || etco2 < 1) return 0.88;   // apnea → flatline en cero
+
+  const period = 60.0 / rr;
+  const phase  = t % period / period;   // 0..1
+
+  // Duraciones de cada fase (fracción del período)
+  // I:E = 1:1.5, con ascenso y descenso muy rápidos (10% del ciclo resp.)
+  const expFrac = 0.60;   // fracción espiratoria
+  const rise    = 0.08;   // ascenso  (8% del ciclo)
+  const fall    = 0.07;   // descenso (7% del ciclo)
+  const plateau = expFrac - rise - fall;   // plateau (~45%)
+  const insp    = 1.0 - expFrac;           // inspiración (~40%)
+
+  // Amplitud normalizada (0..1)
+  const amp = Math.min(1.0, etco2 / 45.0);
+
+  let y = 0;
+
+  if (phase < rise) {
+    // Fase I — ascenso rápido, casi vertical con leve curva inicial
+    const p = phase / rise;
+    y = amp * (1 - Math.cos(p * Math.PI)) / 2;
+  } else if (phase < rise + plateau) {
+    // Fase II — plateau alveolar con pendiente ascendente suave (+3% sobre amp)
+    const p = (phase - rise) / plateau;
+    y = amp * (1.0 + 0.03 * p);
+  } else if (phase < expFrac) {
+    // Fase III — caída abrupta, casi vertical
+    const p = (phase - (rise + plateau)) / fall;
+    y = amp * (1.03) * (1 - (1 - Math.cos(p * Math.PI)) / 2);
+  } else {
+    // Fase 0 — línea de base inspiratoria = 0 (o muy cerca)
+    y = 0.0;
+  }
+
+  // Mapear: y=0 → posición baja (0.88), y=1 → posición alta (0.12)
+  return 0.88 - y * 0.76;
+}
+
+// ─── RENDER LOOP ────────────────────────────────────────────────
+let lastTs = 0;
+ecgPhase = spo2Phase = respPhase = etco2Phase = 0;
+
+// pixels/second for each channel (controls how fast the sweep moves)
+// ECG: 25mm/s @ ~4px/mm on tablet → ~100px/s
+// SpO2 synced to HR visually (same speed as ECG for pleth)
+// Resp: slower sweep ~25px/s
+// EtCO2: synced to RR ~50px/s
+const SWEEP = { ecg: 100, spo2: 100, resp: 28, etco2: 55 };
+
+function drawWave(cv, genFn, phaseRef, sweepPxPerSec, dt) {
+  const W = cv.el.width, H = cv.el.height;
+  const ctx = cv.ctx;
+
+  // How many pixels to advance this frame
+  const advance = sweepPxPerSec * dt;
+  const steps = Math.max(1, Math.round(advance));
+  const dtPerStep = dt / steps;
+
+  for (let s = 0; s < steps; s++) {
+    const px = Math.round(cv.pos) % W;
+
+    // Erase a gap ahead of the writing position (the classic "chase" eraser)
+    const eraseAhead = 28;
+    ctx.fillStyle = '#0a1e3a';
+    ctx.fillRect(px, 0, eraseAhead, H);
+
+    // Compute sample
+    const y = genFn(phaseRef + s * dtPerStep) * H;
+    cv.buf[px] = isNaN(y) ? H/2 : Math.max(0, Math.min(H-1, y));
+    cv.pos = (cv.pos + advance / steps);
+  }
+
+  // ── Full redraw each frame (clean, no tearing) ──
+  ctx.clearRect(0, 0, W, H);
+
+  // Grid
+  ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+  ctx.lineWidth = 0.5;
+  const gridX = Math.round(W / 10);
+  const gridY = Math.round(H / 4);
+  for (let gx = 0; gx < W; gx += gridX) {
+    ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, H); ctx.stroke();
+  }
+  for (let gy = gridY; gy < H; gy += gridY) {
+    ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(W, gy); ctx.stroke();
+  }
+
+  // Trace — glow effect: draw twice (blurry + sharp)
+  const writePos = Math.round(cv.pos) % W;
+  for (let pass = 0; pass < 2; pass++) {
+    ctx.strokeStyle = cv.color;
+    ctx.lineWidth   = pass === 0 ? 3.5 : 1.6;
+    ctx.globalAlpha = pass === 0 ? 0.25 : 1.0;
+    ctx.shadowColor = cv.color;
+    ctx.shadowBlur  = pass === 0 ? 12 : 4;
+    ctx.beginPath();
+    let penDown = false;
+    for (let i = 0; i < W; i++) {
+      const xi = (writePos - W + i + W) % W;
+      const screenX = i;
+      const yi = cv.buf[xi];
+      // Break trace at the write cursor gap
+      const dist = (i - (W - eraseAheadGlobal));
+      if (i >= W - eraseAheadGlobal - 2) {
+        penDown = false;
+        continue;
+      }
+      if (!penDown) { ctx.moveTo(screenX, yi); penDown = true; }
+      else ctx.lineTo(screenX, yi);
+    }
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1.0;
+  ctx.shadowBlur  = 0;
+}
+
+const eraseAheadGlobal = 28;
+
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+
+// ─── PARAM DISPLAY ──────────────────────────────────────────────
+let monitorStarted = false;  // true once instructor starts the timer at least once
+
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+
+function updateParam(key, val) {
+  vitals[key] = parseFloat(val);
+  document.getElementById('cpv-' + key).textContent = key === 'temp' ? parseFloat(val).toFixed(1) : Math.round(val);
+  updateDisplay();
+}
+
+function updateNBP() {
+  vitals.sys = parseInt(document.getElementById('sl-sys').value);
+  vitals.dia = parseInt(document.getElementById('sl-dia').value);
+  document.getElementById('cpv-sys').textContent = vitals.sys;
+  document.getElementById('cpv-dia').textContent = vitals.dia;
+  updateDisplay();
+}
+
+// ─── ALARMS ─────────────────────────────────────────────────────
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+
+function silenceAlarm() {
+  alarmSilenced = true;
+  document.getElementById('alarm-banner').classList.remove('show');
+  setTimeout(() => { alarmSilenced = false; checkAlarms(); }, 120000);
+}
+
+function setAlarmLimit(param, side, val) {
+  if (!val) return;
+  limites[param][side] = parseFloat(val);
+  document.getElementById('lim-' + param + '-' + side).textContent = val;
+  document.getElementById('al-'  + param + '-' + side).textContent = val;
+  checkAlarms();
+}
+
+// Scenarios removed — instructor adjusts vitals directly via sliders
+
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+
+// ─── SLIGHT PHYSIOLOGICAL VARIATION ────────────────────────────
+setInterval(() => {
+  if (!monitorStarted) return;
+  const jitter = (max) => (Math.random()-0.5) * max;
+  vitals.hr    = Math.max(0, vitals.hr    + jitter(2));
+  vitals.spo2  = Math.min(100, Math.max(50, vitals.spo2 + jitter(0.4)));
+  vitals.rr    = Math.max(0, vitals.rr    + jitter(1));
+  vitals.temp  = parseFloat((vitals.temp  + jitter(0.05)).toFixed(1));
+  vitals.etco2 = Math.max(0, vitals.etco2 + jitter(0.5));
+  syncSliders();
+  updateDisplay();
+}, 3000);
+
+// ─── CRONÓMETRO ─────────────────────────────────────────────────
+let timerRunning = false, timerSeconds = 0, timerInterval = null;
+let markCount = 0, markTimes = [];
+
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+
+function timerReset() {
+  timerRunning = false;
+  clearInterval(timerInterval); timerInterval = null;
+  timerSeconds = 0;
+  markCount = 0; markTimes = [];
+  const bs = document.getElementById('btn-start');
+  if (bs) { bs.textContent = 'INICIAR'; bs.classList.remove('stop'); }
+  const te = document.getElementById('timer-events');
+  if (te) te.innerHTML = '';
+  renderTimer();
+  fbPushTimer();
+}
+
+function timerMark() {
+  if (!timerRunning) return;
+  markCount++;
+  const t = formatTime(timerSeconds);
+  markTimes.push(t);
+  const el = document.getElementById('timer-events');
+  const item = document.createElement('div');
+  item.className = 'tevent new';
+  item.textContent = `M${markCount}: ${t}`;
+  el.insertBefore(item, el.firstChild);
+  setTimeout(() => item.classList.remove('new'), 2000);
+}
+
+function formatTime(s) {
+  const m = Math.floor(s / 60);
+  const ss = s % 60;
+  return String(m).padStart(2,'0') + ':' + String(ss).padStart(2,'0');
+}
+
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+
+// ─── CONTROL PANEL ──────────────────────────────────────────────
+function toggleCtrlPanel() {
+  if (appMode === 'monitor') return; // monitor cannot open vitals ctrl panel
+  document.getElementById('ctrl-panel').classList.toggle('open');
+}
+
+function openCtrl(param) {
+  if (appMode === 'monitor') return; // monitor cannot adjust vitals
+  document.getElementById('ctrl-panel').classList.add('open');
+  const el = document.getElementById('cp-' + param);
+  if (el) el.scrollIntoView({ behavior:'smooth', block:'nearest' });
+}
+
+// ─── ARTIFACT / NOISE ───────────────────────────────────────────
+function toggleArtifact() { artifact = !artifact; }
+function toggleNoise()    { noise    = !noise;    }
+
+// ─── FULLSCREEN ─────────────────────────────────────────────────
+function toggleFS() {
+  if (!document.fullscreenElement) {
+    document.documentElement.requestFullscreen().catch(()=>{});
+  } else {
+    document.exitFullscreen();
+  }
+}
+
+// ─── CLOCK ──────────────────────────────────────────────────────
+function updateClock() {
+  const now = new Date();
+  document.getElementById('tb-clock').textContent =
+    now.toLocaleTimeString('es-AR', {hour12:false});
+  document.getElementById('tb-date').textContent =
+    now.toLocaleDateString('es-AR', {day:'2-digit',month:'2-digit',year:'numeric'});
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+// ─── INIT ────────────────────────────────────────────────────────
+window.addEventListener('load', () => {
+  // Show mode selector — user picks monitor or instructor
+  // Canvases init deferred to startMode()
+  // Pre-init with normal scenario values so instructor sliders show correct defaults
+  Object.assign(vitals, { hr:140, spo2:96, rr:40, sys:65, dia:40, temp:36.8, etco2:38 });
+  // Session ID is now set dynamically when room is created/joined
+});
+
+
+// ═══════════════════════════════════════════════════════════════
+// ─── MODE MANAGEMENT ────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+let appMode = null;  // 'monitor' | 'instructor'
+
+// startMode v1 removed
+
+// ─── INSTRUCTOR NAV ──────────────────────────────────────────────
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+
+// ipUpdateScen removed
+
+// ─── INSTRUCTOR VITALS ───────────────────────────────────────────
+const IP_VITALS = [
+  { key:'hr',   label:'FC (lpm)',      color:getComputedStyle(document.documentElement).getPropertyValue('--ecg')||'#00ff44',   min:0,   max:250, step:1,   fmt: v=>Math.round(v) },
+  { key:'spo2', label:'SpO₂ (%)',      color:'#00cfff', min:50,  max:100, step:1,   fmt: v=>Math.round(v) },
+  { key:'rr',   label:'FR (rpm)',      color:'#ffff00', min:0,   max:120, step:1,   fmt: v=>Math.round(v) },
+  { key:'sys',  label:'PNI Sis (mmHg)',color:'#ff4dc4', min:20,  max:120, step:1,   fmt: v=>Math.round(v) },
+  { key:'dia',  label:'PNI Dia (mmHg)',color:'#ff4dc4', min:10,  max:80,  step:1,   fmt: v=>Math.round(v) },
+  { key:'temp', label:'Temp (°C)',     color:'#ff6b6b', min:32,  max:41,  step:0.1, fmt: v=>parseFloat(v).toFixed(1) },
+  { key:'etco2',label:'EtCO₂ (mmHg)', color:'#ff9500', min:0,   max:80,  step:1,   fmt: v=>Math.round(v) },
+];
+
+function renderIPVitals() {
+  const grid = document.getElementById('ip-vitals-grid');
+  grid.innerHTML = IP_VITALS.map(v => `
+    <div class="ip-vital-row">
+      <div class="ip-vital-label" style="color:${v.color}">${v.label}</div>
+      <div class="ip-vital-ctrl">
+        <input type="range" min="${v.min}" max="${v.max}" step="${v.step}"
+          value="${vitals[v.key]}" style="accent-color:${v.color}"
+          oninput="ipSetVital('${v.key}',this.value,this)">
+        <span class="ip-vital-val" id="ipv-${v.key}">${v.fmt(vitals[v.key])}</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+
+// Sync instructor sliders when scenario transitions
+// [removed duplicate]
+function syncSliders() {
+  if (appMode === 'instructor') {
+    IP_VITALS.forEach(v => {
+      const sl = document.querySelector(`#ip-vitals-grid input[oninput*="'${v.key}'"]`);
+      if (sl) {
+        sl.value = vitals[v.key];
+        const disp = document.getElementById('ipv-' + v.key);
+        if (disp) disp.textContent = v.fmt(vitals[v.key]);
+      }
+    });
+  }
+}
+
+// ─── INSTRUCTOR TIMER ────────────────────────────────────────────
+function ipTimerToggle() {
+  timerToggle();
+  const btn = document.getElementById('ip-btn-start');
+  if (btn) {
+    btn.textContent = timerRunning ? 'DETENER' : 'INICIAR';
+    btn.className = timerRunning
+      ? 'am-btn am-btn-skip'
+      : 'am-btn am-btn-confirm';
+  }
+}
+
+function ipSyncTimer() {
+  const btn = document.getElementById('ip-btn-start');
+  if (btn) { btn.textContent = 'INICIAR'; btn.className = 'am-btn am-btn-confirm'; }
+  renderIPApgar();
+}
+
+// Override renderTimer to also update instructor display
+// [removed duplicate]
+
+// ═══════════════════════════════════════════════════════════════
+// ─── APGAR SYSTEM ───────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+
+const APGAR_MINUTES = [1, 5, 10, 15, 20];
+
+const APGAR_CRITERIA = [
+  {
+    key: 'fc', name: 'FRECUENCIA CARDÍACA',
+    opts: [
+      { val: 0, label: '0', desc: 'Ausente' },
+      { val: 1, label: '1', desc: '<100 lpm' },
+      { val: 2, label: '2', desc: '≥100 lpm' },
+    ]
+  },
+  {
+    key: 'resp', name: 'ESFUERZO RESPIRATORIO',
+    opts: [
+      { val: 0, label: '0', desc: 'Ausente' },
+      { val: 1, label: '1', desc: 'Débil / irregular' },
+      { val: 2, label: '2', desc: 'Llanto vigoroso' },
+    ]
+  },
+  {
+    key: 'tono', name: 'TONO MUSCULAR',
+    opts: [
+      { val: 0, label: '0', desc: 'Flácido' },
+      { val: 1, label: '1', desc: 'Flexión leve' },
+      { val: 2, label: '2', desc: 'Movimiento activo' },
+    ]
+  },
+  {
+    key: 'reflex', name: 'IRRITABILIDAD REFLEJA',
+    opts: [
+      { val: 0, label: '0', desc: 'Sin respuesta' },
+      { val: 1, label: '1', desc: 'Mueca' },
+      { val: 2, label: '2', desc: 'Llanto / tos' },
+    ]
+  },
+  {
+    key: 'color', name: 'COLOR',
+    opts: [
+      { val: 0, label: '0', desc: 'Azul / pálido' },
+      { val: 1, label: '1', desc: 'Acrocianosis' },
+      { val: 2, label: '2', desc: 'Rosado' },
+    ]
+  },
+];
+
+// State
+let apgarScores  = {};   // { 1: {fc:2,resp:1,...,total:8}, 5: {...}, ... }
+let apgarEnabled = {};   // { 1: false, 5: false, ... }  — true when minute reached
+let apgarPending = null; // which minute is currently in modal
+let apgarCurrentSelections = {};
+
+// Minute thresholds in seconds
+const APGAR_TRIGGER_SECONDS = { 1:60, 5:300, 10:600, 15:900, 20:1200 };
+
+// Check if any Apgar should be triggered
+function checkApgarTriggers() {
+  APGAR_MINUTES.forEach(min => {
+    if (apgarEnabled[min]) return;   // already enabled
+    const threshold = APGAR_TRIGGER_SECONDS[min];
+    if (timerSeconds >= threshold) {
+      apgarEnabled[min] = true;
+      // Mark slot as ready (clickable) on monitor
+      const slot = document.getElementById('apgar-slot-' + min);
+      if (slot && !apgarScores[min]) {
+        slot.className = 'apgar-slot ready';
+      }
+      updateIPApgarSlot(min);
+      // Show Apgar modal on MONITOR (participant scores), instructor just sees it in their panel
+      if (appMode === 'monitor' && !apgarScores[min]) {
+        setTimeout(() => openApgarModal(min), 300);
+      }
+    }
+  });
+}
+
+function onMonitorApgarClick(min) {
+  // Participant clicks on a slot: only open if enabled (unlocked)
+  if (!apgarEnabled[min]) return;
+  openApgarModal(min);
+}
+
+function openApgarModal(min) {
+  apgarPending = min;
+  apgarCurrentSelections = {};
+  // Pre-fill with existing if re-editing
+  if (apgarScores[min]) {
+    Object.assign(apgarCurrentSelections, apgarScores[min]);
+  }
+  document.getElementById('apgar-modal-title').textContent = min + ' min';
+  renderApgarCriteria();
+  document.getElementById('apgar-modal-overlay').classList.add('open');
+}
+
+function renderApgarCriteria() {
+  const container = document.getElementById('apgar-criteria');
+  container.innerHTML = APGAR_CRITERIA.map(c => `
+    <div class="am-crit-row">
+      <div class="am-crit-name">${c.name}</div>
+      <div class="am-crit-opts">
+        ${c.opts.map(o => `
+          <div class="am-opt ${apgarCurrentSelections[c.key]===o.val?'selected':''}"
+            onclick="selectApgarCrit('${c.key}',${o.val})">
+            <div class="am-opt-val">${o.label}</div>
+            <div class="am-opt-desc">${o.desc}</div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `).join('');
+  updateApgarTotal();
+}
+
+function selectApgarCrit(key, val) {
+  apgarCurrentSelections[key] = val;
+  renderApgarCriteria();
+}
+
+function updateApgarTotal() {
+  const filled = APGAR_CRITERIA.filter(c => apgarCurrentSelections[c.key] !== undefined);
+  const total = filled.reduce((sum, c) => sum + apgarCurrentSelections[c.key], 0);
+  const complete = filled.length === APGAR_CRITERIA.length;
+  const totalEl = document.getElementById('apgar-total');
+  const interpEl = document.getElementById('apgar-interp');
+  if (complete) {
+    totalEl.textContent = total;
+    if (total >= 7) {
+      totalEl.style.color = '#00ff44';
+      interpEl.textContent = 'NORMAL';
+      interpEl.style.color = '#00ff44';
+    } else if (total >= 4) {
+      totalEl.style.color = '#ffaa00';
+      interpEl.textContent = 'DEPRESIÓN MODERADA';
+      interpEl.style.color = '#ffaa00';
+    } else {
+      totalEl.style.color = '#ff3333';
+      interpEl.textContent = 'DEPRESIÓN GRAVE';
+      interpEl.style.color = '#ff3333';
+    }
+  } else {
+    totalEl.textContent = '—';
+    totalEl.style.color = '#555';
+    interpEl.textContent = `(${filled.length}/5 criterios)`;
+    interpEl.style.color = '#555';
+  }
+}
+
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+
+function skipApgar() {
+  document.getElementById('apgar-modal-overlay').classList.remove('open');
+  apgarPending = null;
+}
+
+function updateApgarDisplay(min) {
+  const score = apgarScores[min];
+  if (!score) return;
+  const total = score.total;
+  const slot  = document.getElementById('apgar-slot-' + min);
+  const valEl = document.getElementById('apgar-val-' + min);
+  if (slot && valEl) {
+    valEl.textContent = total;
+    if (total >= 7)      slot.className = 'apgar-slot done-good';
+    else if (total >= 4) slot.className = 'apgar-slot done-warn';
+    else                 slot.className = 'apgar-slot done-crit';
+  }
+  updateIPApgarSlot(min);
+}
+
+function updateIPApgarSlot(min) {
+  const slot = document.getElementById('ip-apgar-slot-' + min);
+  if (!slot) return;
+  const score = apgarScores[min];
+  const scoreEl = slot.querySelector('.ip-apgar-score');
+  const btn = slot.querySelector('.ip-apgar-btn');
+  if (score) {
+    slot.className = 'ip-apgar-slot done';
+    scoreEl.textContent = score.total;
+    if (btn) btn.textContent = '✏️ Editar';
+  } else if (apgarEnabled[min]) {
+    slot.className = 'ip-apgar-slot ready';
+    scoreEl.textContent = '?';
+    if (btn) btn.textContent = '▶ Cargar';
+  } else {
+    slot.className = 'ip-apgar-slot locked';
+    scoreEl.textContent = '—';
+    if (btn) btn.textContent = '🔒 Bloqueado';
+  }
+}
+
+function renderIPApgar() {
+  const grid = document.getElementById('ip-apgar-grid');
+  if (!grid) return;
+  grid.innerHTML = APGAR_MINUTES.map(min => {
+    const score = apgarScores[min];
+    const enabled = apgarEnabled[min];
+    const cls = score ? 'done' : enabled ? 'ready' : 'locked';
+    const scoreDisplay = score ? score.total : enabled ? '?' : '—';
+    return `
+      <div class="ip-apgar-slot ${cls}" id="ip-apgar-slot-${min}">
+        <div class="ip-apgar-slot-time">${min} min</div>
+        <div class="ip-apgar-score">${scoreDisplay}</div>
+        <button class="ip-apgar-btn" onclick="${enabled ? `openApgarModal(${min})` : ''}"
+          ${!enabled ? 'disabled' : ''}>
+          ${score ? '✏️ Editar' : enabled ? '▶ Cargar' : '🔒 Bloqueado'}
+        </button>
+      </div>`;
+  }).join('');
+
+  // History
+  const hist = document.getElementById('ip-apgar-history');
+  const done = APGAR_MINUTES.filter(m => apgarScores[m]);
+  if (!done.length) { hist.innerHTML = ''; return; }
+  hist.innerHTML = `
+    <div style="font-size:10px;font-weight:700;color:#4a7aaa;letter-spacing:1px;margin-top:16px;margin-bottom:8px">HISTORIAL</div>
+    ${done.map(m => {
+      const s = apgarScores[m];
+      const color = s.total>=7 ? '#00ff44' : s.total>=4 ? '#ffaa00' : '#ff3333';
+      const detail = APGAR_CRITERIA.map(c => `${c.name.split(' ')[0]}:${s[c.key]}`).join(' · ');
+      return `<div class="ip-apgar-history-row">
+        <div class="iph-time">${m} min</div>
+        <div class="iph-score" style="color:${color}">${s.total}</div>
+        <div class="iph-detail">${detail}</div>
+      </div>`;
+    }).join('')}`;
+}
+
+// Reset apgar on timer reset
+// timerReset is fully handled by fullReset below
+
+// ═══════════════════════════════════════════════════════════════
+// ─── ALARM CONFIG (Instructor) ──────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+const ALARM_DEFS = [
+  { key:'hr',    label:'FC',    unit:'lpm',  color:'#00ff44', hasLo:true,  hasHi:true  },
+  { key:'spo2',  label:'SpO₂',  unit:'%',    color:'#00cfff', hasLo:true,  hasHi:false },
+  { key:'rr',    label:'FR',    unit:'rpm',  color:'#ffff00', hasLo:true,  hasHi:true  },
+  { key:'temp',  label:'Temp',  unit:'°C',   color:'#ff6b6b', hasLo:true,  hasHi:true  },
+  { key:'etco2', label:'EtCO₂', unit:'mmHg', color:'#ff9500', hasLo:true,  hasHi:true  },
+];
+let alarmEnabled = { hr:true, spo2:true, rr:true, temp:true, etco2:true };
+
+function renderIPAlarms() {
+  const table = document.getElementById('ip-alarm-table');
+  if (!table) return;
+  table.innerHTML = `
+    <tr>
+      <th>Parámetro</th><th>Activa</th>
+      <th>Límite bajo</th><th>Límite alto</th>
+    </tr>
+    ${ALARM_DEFS.map(d => `
+      <tr>
+        <td style="color:${d.color};font-weight:700;font-size:12px;letter-spacing:1px">${d.label}<span style="color:#3d6a9a;font-size:10px;margin-left:6px">${d.unit}</span></td>
+        <td>
+          <button class="ip-alarm-toggle ${alarmEnabled[d.key]?'on':'off'}"
+            id="iptoggle-${d.key}" onclick="toggleAlarmEnabled('${d.key}')"></button>
+        </td>
+        <td>${d.hasLo ? `<input class="ip-alarm-input" id="ipal-${d.key}-lo" type="number" value="${limites[d.key].lo}" step="0.1">` : '—'}</td>
+        <td>${d.hasHi ? `<input class="ip-alarm-input" id="ipal-${d.key}-hi" type="number" value="${limites[d.key].hi}" step="0.1">` : '—'}</td>
+      </tr>
+    `).join('')}
+  `;
+}
+
+function toggleAlarmEnabled(key) {
+  alarmEnabled[key] = !alarmEnabled[key];
+  const btn = document.getElementById('iptoggle-' + key);
+  if (btn) btn.className = `ip-alarm-toggle ${alarmEnabled[key]?'on':'off'}`;
+}
+
+function saveAlarmsFromInstructor() {
+  ALARM_DEFS.forEach(d => {
+    const lo = document.getElementById('ipal-' + d.key + '-lo');
+    const hi = document.getElementById('ipal-' + d.key + '-hi');
+    if (lo) { limites[d.key].lo = parseFloat(lo.value);
+      const el = document.getElementById('lim-' + d.key + '-lo');
+      if (el) el.textContent = lo.value;
+    }
+    if (hi) { limites[d.key].hi = parseFloat(hi.value);
+      const el = document.getElementById('lim-' + d.key + '-hi');
+      if (el) el.textContent = hi.value;
+    }
+  });
+  checkAlarms();
+  // Flash confirmation
+  const btn = event.target;
+  const orig = btn.textContent;
+  btn.textContent = '✓ Aplicado';
+  setTimeout(() => btn.textContent = orig, 1500);
+}
+
+function resetAlarmDefaults() {
+  const defaults = { hr:{lo:60,hi:200}, spo2:{lo:88,hi:100}, rr:{lo:30,hi:80}, temp:{lo:36.0,hi:37.5}, etco2:{lo:35,hi:45} };
+  Object.assign(limites, JSON.parse(JSON.stringify(defaults)));
+  renderIPAlarms();
+  saveAlarmsFromInstructor();
+}
+
+function openAlarmModal() { renderIPAlarmModal(); document.getElementById('alarm-modal-overlay').classList.add('open'); }
+function closeAlarmModal() { document.getElementById('alarm-modal-overlay').classList.remove('open'); }
+function saveAlarmModal() { saveAlarmsFromInstructor(); closeAlarmModal(); }
+function renderIPAlarmModal() {
+  const body = document.getElementById('alarm-modal-body');
+  body.innerHTML = ALARM_DEFS.map(d => `
+    <div class="alm-row">
+      <div class="alm-name" style="color:${d.color}">${d.label}<br><span style="color:#3d6a9a;font-size:9px">${d.unit}</span></div>
+      <div class="alm-label">Lo</div>
+      <input class="alm-input" id="almod-${d.key}-lo" type="number" value="${limites[d.key].lo}" step="0.1" ${d.hasLo?'':'disabled style="opacity:.3"'}>
+      <div class="alm-label">Hi</div>
+      <input class="alm-input" id="almod-${d.key}-hi" type="number" value="${limites[d.key].hi}" step="0.1" ${d.hasHi?'':'disabled style="opacity:.3"'}>
+    </div>
+  `).join('');
+}
+
+// Override checkAlarms to respect alarmEnabled
+// [removed duplicate]
+function checkAlarms() {
+  activeAlarms.clear();
+  function check(key, val) {
+    const l = limites[key];
+    const el = document.getElementById('alarm-' + key);
+    if (!el || !alarmEnabled[key]) { if(el) el.classList.remove('active'); return; }
+    const triggered = val < l.lo || val > l.hi;
+    el.classList.toggle('active', triggered);
+    if (triggered) activeAlarms.add(key.toUpperCase());
+  }
+  check('hr',    vitals.hr);
+  check('spo2',  vitals.spo2);
+  check('rr',    vitals.rr);
+  check('temp',  parseFloat(vitals.temp));
+  check('etco2', vitals.etco2);
+  const banner = document.getElementById('alarm-banner');
+  if (activeAlarms.size > 0 && !alarmSilenced) {
+    banner.classList.add('show');
+    document.getElementById('alarm-text').textContent = '⚠ ALARMA: ' + [...activeAlarms].join(' · ');
+  } else {
+    banner.classList.remove('show');
+  }
+}
+
+// ─── OVERRIDE renderTimer TO ALSO UPDATE INSTRUCTOR ──────────────
+function renderTimer() {
+  const el = document.getElementById('timer-display');
+  if (el) {
+    el.textContent = formatTime(timerSeconds);
+    el.className = timerRunning
+      ? (timerSeconds >= 600 ? 'alert' : 'running')
+      : '';
+  }
+  // Sync instructor timer display
+  const ipEl = document.getElementById('ip-timer-display');
+  if (ipEl) {
+    ipEl.textContent = formatTime(timerSeconds);
+    ipEl.style.color = timerSeconds >= 600 ? '#ff3333' : timerRunning ? '#00ff44' : '#ffcc00';
+  }
+  // Sync instructor events
+  const ipEv = document.getElementById('ip-events');
+  const monEv = document.getElementById('timer-events');
+  if (ipEv && monEv) ipEv.innerHTML = monEv.innerHTML;
+  // Check Apgar triggers
+  checkApgarTriggers();
+  // Update bottom bar Apgar status strip (monitor only)
+  updateApgarBottomBar();
+}
+
+// ─── APGAR BOTTOM BAR STATUS (monitor) ──────────────────────────
+function updateApgarBottomBar() {
+  const el = document.getElementById('apgar-bottombar-status');
+  const hint = document.getElementById('apgar-bottombar-hint');
+  if (!el) return;
+  el.innerHTML = APGAR_MINUTES.map(min => {
+    const score   = apgarScores[min];
+    const enabled = apgarEnabled[min];
+    if (score) {
+      const color = score.total>=7 ? '#00ff44' : score.total>=4 ? '#ffaa00' : '#ff3333';
+      return `<div style="text-align:center;cursor:pointer" onclick="onMonitorApgarClick(${min})">
+        <div style="font-size:9px;color:#4a7aaa;letter-spacing:0.5px">${min}'</div>
+        <div style="font-family:var(--mono);font-size:22px;color:${color};line-height:1">${score.total}</div>
+      </div>`;
+    } else if (enabled) {
+      return `<div style="text-align:center;cursor:pointer;animation:pulse-gold 1.5s infinite" onclick="onMonitorApgarClick(${min})">
+        <div style="font-size:9px;color:#664400;letter-spacing:0.5px">${min}'</div>
+        <div style="font-family:var(--mono);font-size:22px;color:#ffcc00;line-height:1">?</div>
+      </div>`;
+    } else {
+      return `<div style="text-align:center;opacity:0.25">
+        <div style="font-size:9px;color:#3d6a9a;letter-spacing:0.5px">${min}'</div>
+        <div style="font-family:var(--mono);font-size:22px;color:#333;line-height:1">—</div>
+      </div>`;
+    }
+  }).join('');
+  // Update hint text
+  if (hint) {
+    const done = APGAR_MINUTES.filter(m => apgarScores[m]).length;
+    const ready = APGAR_MINUTES.filter(m => apgarEnabled[m] && !apgarScores[m]).length;
+    if (ready > 0) hint.textContent = `⚡ ${ready} evaluación${ready>1?'es':''} pendiente${ready>1?'s':''}`;
+    else if (done > 0) hint.textContent = `✓ ${done}/5 completados`;
+    else hint.textContent = 'Los slots se habilitan al llegar cada minuto';
+    hint.style.color = ready > 0 ? '#ffcc00' : done > 0 ? '#00cc44' : '#444';
+  }
+}
+
+// Prevent context menu on long press (tablet)
+document.addEventListener('contextmenu', e => e.preventDefault());
+</script>
+
+<!-- ═══════ DASHBOARD DEBRIEFING ═══════ -->
+<div id="dashboard-overlay" style="display:none;position:fixed;inset:0;z-index:500;background:#071528;overflow-y:auto;font-family:'Rajdhani',sans-serif;">
+  <div style="max-width:960px;margin:0 auto;padding:20px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;padding-bottom:14px;border-bottom:1px solid #222">
+      <div>
+        <div style="font-size:11px;color:#4a7aaa;letter-spacing:2px;font-family:'Share Tech Mono',monospace">NEOMONITOR SIM</div>
+        <div style="font-size:24px;font-weight:700;margin-top:2px">Dashboard de Debriefing</div>
+        <div style="font-size:12px;color:#5588bb;margin-top:4px" id="dash-meta"></div>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button onclick="exportDebriefPDF()" style="background:#0e1e40;color:#ff6644;border:1px solid #550000;border-radius:8px;padding:10px 18px;font-family:'Rajdhani',sans-serif;font-weight:700;font-size:13px;cursor:pointer">⬇ Exportar PDF</button>
+        <button onclick="closeDashboard()" style="background:#122b50;color:#6aaad4;border:1px solid #333;border-radius:8px;padding:10px 18px;font-family:'Rajdhani',sans-serif;font-weight:700;font-size:13px;cursor:pointer">Cerrar</button>
+      </div>
+    </div>
+    <div style="background:#0d2548;border:1px solid #222;border-radius:14px;padding:18px;margin-bottom:16px">
+      <div style="font-size:11px;font-weight:700;color:#4488ff;letter-spacing:1.5px;margin-bottom:12px">CASO CLÍNICO</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div><label style="font-size:10px;color:#4a7aaa;letter-spacing:1px;display:block;margin-bottom:4px">ESCENARIO</label><input id="brief-scenario" placeholder="Ej: Depresión neonatal severa" style="width:100%;background:#0a2040;border:1px solid #333;border-radius:6px;padding:8px 10px;color:#fff;font-family:'Rajdhani',sans-serif;font-size:14px"></div>
+        <div><label style="font-size:10px;color:#4a7aaa;letter-spacing:1px;display:block;margin-bottom:4px">FECHA / CENTRO</label><input id="brief-center" placeholder="Ej: Hospital Garrahan — 07/05/2026" style="width:100%;background:#0a2040;border:1px solid #333;border-radius:6px;padding:8px 10px;color:#fff;font-family:'Rajdhani',sans-serif;font-size:14px"></div>
+        <div style="grid-column:1/-1"><label style="font-size:10px;color:#4a7aaa;letter-spacing:1px;display:block;margin-bottom:4px">OBJETIVOS / BRIEF</label><textarea id="brief-objectives" rows="3" placeholder="Describí los objetivos del caso, contexto clínico y puntos a evaluar..." style="width:100%;background:#0a2040;border:1px solid #333;border-radius:6px;padding:8px 10px;color:#fff;font-family:'Rajdhani',sans-serif;font-size:13px;resize:vertical"></textarea></div>
+      </div>
+    </div>
+    <div style="background:#0d2548;border:1px solid #222;border-radius:14px;padding:18px;margin-bottom:16px">
+      <div style="font-size:11px;font-weight:700;color:#ffcc00;letter-spacing:1.5px;margin-bottom:14px">PUNTAJE APGAR</div>
+      <div id="dash-apgar-row" style="display:flex;gap:12px;flex-wrap:wrap"></div>
+    </div>
+    <div style="background:#0d2548;border:1px solid #222;border-radius:14px;padding:18px;margin-bottom:16px">
+      <div style="font-size:11px;font-weight:700;color:#00ff44;letter-spacing:1.5px;margin-bottom:14px">TENDENCIA DE PARÁMETROS VITALES</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+        <div style="background:#0a2040;border-radius:10px;padding:14px"><div style="font-size:10px;color:#00ff44;font-weight:700;letter-spacing:1px;margin-bottom:8px">FC (lpm)</div><div style="position:relative;height:120px"><canvas id="chart-hr-trend"></canvas></div></div>
+        <div style="background:#0a2040;border-radius:10px;padding:14px"><div style="font-size:10px;color:#00cfff;font-weight:700;letter-spacing:1px;margin-bottom:8px">SpO₂ (%)</div><div style="position:relative;height:120px"><canvas id="chart-spo2-trend"></canvas></div></div>
+        <div style="background:#0a2040;border-radius:10px;padding:14px"><div style="font-size:10px;color:#ffff00;font-weight:700;letter-spacing:1px;margin-bottom:8px">FR (rpm)</div><div style="position:relative;height:120px"><canvas id="chart-rr-trend"></canvas></div></div>
+        <div style="background:#0a2040;border-radius:10px;padding:14px"><div style="font-size:10px;color:#ff9500;font-weight:700;letter-spacing:1px;margin-bottom:8px">EtCO₂ (mmHg)</div><div style="position:relative;height:120px"><canvas id="chart-etco2-trend"></canvas></div></div>
+      </div>
+    </div>
+    <div style="background:#0d2548;border:1px solid #222;border-radius:14px;padding:18px;margin-bottom:16px">
+      <div style="font-size:11px;font-weight:700;color:#ff9500;letter-spacing:1.5px;margin-bottom:14px">LÍNEA DE TIEMPO — INTERVENCIONES RCP 2025</div>
+      <div id="dash-timeline" style="position:relative;padding-left:24px"></div>
+    </div>
+    <div style="background:#0d2548;border:1px solid #222;border-radius:14px;padding:18px;margin-bottom:16px">
+      <div style="font-size:11px;font-weight:700;color:#6aaad4;letter-spacing:1.5px;margin-bottom:10px">OBSERVACIONES DEL INSTRUCTOR</div>
+      <textarea id="dash-notes" rows="4" placeholder="Comentarios, puntos de mejora, fortalezas observadas..." style="width:100%;background:#0a2040;border:1px solid #333;border-radius:6px;padding:10px;color:#fff;font-family:'Rajdhani',sans-serif;font-size:13px;resize:vertical"></textarea>
+    </div>
+  </div>
+</div>
+
+<!-- INTERVENTIONS MODAL -->
+<div id="interv-modal-overlay" style="display:none;position:fixed;inset:0;z-index:300;background:rgba(0,0,0,0.85);backdrop-filter:blur(3px);align-items:flex-end;justify-content:center" onclick="if(event.target===this)closeIntervModal()">
+  <div style="background:#0d2548;border:1px solid #333;border-radius:16px 16px 0 0;width:min(700px,100vw);max-height:85vh;overflow-y:auto;animation:modal-in 0.2s ease">
+    <div style="background:#1a0e00;padding:14px 18px;border-bottom:1px solid #333;display:flex;align-items:center;justify-content:space-between;border-radius:16px 16px 0 0;position:sticky;top:0;z-index:1">
+      <div>
+        <div style="font-size:16px;font-weight:700;color:#ff9500;letter-spacing:1px">INTERVENCIONES RCP NEONATAL 2025</div>
+        <div style="font-size:11px;color:#664400;margin-top:2px" id="interv-timer-display">Tiempo: 00:00</div>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center">
+        <div style="font-size:11px;color:#555" id="interv-count-display">0 registradas</div>
+        <div onclick="closeIntervModal()" style="cursor:pointer;color:#4a7aaa;font-size:20px;padding:4px 10px">✕</div>
+      </div>
+    </div>
+    <div style="padding:16px 18px">
+      <div id="interv-steps-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px"></div>
+      <div style="margin-top:14px;padding-top:14px;border-top:1px solid #122b50">
+        <div style="font-size:10px;font-weight:700;color:#4a7aaa;letter-spacing:1px;margin-bottom:8px">INTERVENCIÓN LIBRE</div>
+        <div style="display:flex;gap:8px">
+          <input id="interv-free-input" placeholder="Describir intervención..." style="flex:1;background:#0a2040;border:1px solid #333;border-radius:8px;padding:10px 12px;color:#fff;font-family:'Rajdhani',sans-serif;font-size:14px" onkeydown="if(event.key==='Enter')addFreeInterv()">
+          <button onclick="addFreeInterv()" style="background:#1a1000;color:#ffaa00;border:1px solid #664400;border-radius:8px;padding:10px 16px;font-family:'Rajdhani',sans-serif;font-weight:700;font-size:13px;cursor:pointer">+ Registrar</button>
+        </div>
+      </div>
+      <div style="margin-top:12px" id="interv-recent-list"></div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
+<script>
+// ═══════════════════════════════════════════════════════════════
+// ─── FIREBASE CONFIG & SYNC ─────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+const firebaseConfig = {
+  apiKey: "AIzaSyB37BE0k6RGmLi7ylCBxzYVb3rwdXubvlU",
+  authDomain: "neomonitor-sim.firebaseapp.com",
+  projectId: "neomonitor-sim",
+  storageBucket: "neomonitor-sim.firebasestorage.app",
+  messagingSenderId: "240040332131",
+  appId: "1:240040332131:web:1835b8d2589d2e37666156",
+  databaseURL: "https://neomonitor-sim-default-rtdb.firebaseio.com"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+// ─── ROOM / SESSION MANAGEMENT ─────────────────────────────────
+let SESSION_ID = null;  // set when room is created or joined
+let selectedRole = null;
+
+// Generate 4-letter room code (consonants only — easy to dictate)
+function genRoomCode() {
+  const chars = 'BCDFGHJKLMNPRSTV';
+  return Array.from({length:4}, () => chars[Math.floor(Math.random()*chars.length)]).join('');
+}
+
+function chooseRole(role) {
+  selectedRole = role;
+  document.getElementById('step-role').style.display       = 'none';
+  document.getElementById('step-instructor').style.display = role === 'instructor' ? '' : 'none';
+  document.getElementById('step-monitor').style.display    = role === 'monitor'    ? '' : 'none';
+  if (role === 'monitor') setTimeout(() => document.getElementById('cb0').focus(), 100);
+}
+
+function volverAlRol() {
+  document.getElementById('step-role').style.display       = '';
+  document.getElementById('step-instructor').style.display = 'none';
+  document.getElementById('step-monitor').style.display    = 'none';
+  document.getElementById('sala-creada').style.display     = 'none';
+  selectedRole = null;
+  SESSION_ID = null;
+  fbSubscribed = false;
+}
+
+function crearSala() {
+  const code = genRoomCode();
+  SESSION_ID = 'sala_' + code;
+  document.getElementById('sala-codigo-display').textContent = code;
+  document.getElementById('sala-creada').style.display = '';
+  // Register the room in Firebase so monitor can verify it exists
+  db.ref(SESSION_ID + '/meta').set({ created: Date.now(), instructor: true });
+}
+
+function entrarComoInstructor() {
+  if (!SESSION_ID) return;
+  startMode('instructor');
+}
+
+function codeInput(idx, el) {
+  el.value = el.value.toUpperCase().replace(/[^A-Z]/g,'');
+  if (el.value && idx < 3) document.getElementById('cb' + (idx+1)).focus();
+  if (idx === 3 && el.value) unirseMonitor();
+}
+
+function codeKey(idx, e) {
+  if (e.key === 'Backspace' && !e.target.value && idx > 0) {
+    document.getElementById('cb' + (idx-1)).focus();
+  }
+}
+
+function unirseMonitor() {
+  const code = [0,1,2,3].map(i => document.getElementById('cb'+i).value.toUpperCase()).join('');
+  const errEl = document.getElementById('code-error');
+  if (code.length < 4) { errEl.textContent = 'Ingresá las 4 letras del código.'; return; }
+  const roomId = 'sala_' + code;
+  errEl.textContent = 'Verificando sala...';
+  // Check if room exists in Firebase
+  db.ref(roomId + '/meta').once('value').then(snap => {
+    if (snap.val()) {
+      SESSION_ID = roomId;
+      errEl.textContent = '';
+      startMode('monitor');
+    } else {
+      errEl.textContent = '❌ Código incorrecto o sala no encontrada.';
+      [0,1,2,3].forEach(i => { document.getElementById('cb'+i).value=''; document.getElementById('cb'+i).style.borderColor='#ff4444'; });
+      setTimeout(() => [0,1,2,3].forEach(i => document.getElementById('cb'+i).style.borderColor='#333'), 1500);
+      document.getElementById('cb0').focus();
+    }
+  }).catch(() => { errEl.textContent = '❌ Error de conexión. Verificá internet.'; });
+}
+
+// Push state to Firebase (instructor → monitor)
+function fbPush(path, data) {
+  if (!SESSION_ID) return;
+  db.ref(SESSION_ID + '/' + path).set(data).catch(e => console.warn('FB push:', e));
+}
+
+// Subscribe to Firebase changes (both modes listen after SESSION_ID is set)
+let fbSubscribed = false;
+function fbSubscribe() {
+  if (!SESSION_ID || fbSubscribed) return;
+  fbSubscribed = true;
+  db.ref(SESSION_ID + '/vitals').on('value', snap => {
+    const v = snap.val();
+    if (!v) return;
+    // Apply vitals from instructor
+    if (Math.abs(v.hr   - vitals.hr)   > 1) { vitals.hr   = v.hr;   }
+    if (Math.abs(v.spo2 - vitals.spo2) > 0.5) { vitals.spo2 = v.spo2; }
+    if (Math.abs(v.rr   - vitals.rr)   > 1) { vitals.rr   = v.rr;   }
+    if (Math.abs(v.sys  - vitals.sys)  > 1) { vitals.sys  = v.sys;  }
+    if (Math.abs(v.dia  - vitals.dia)  > 1) { vitals.dia  = v.dia;  }
+    vitals.temp  = v.temp;
+    vitals.etco2 = v.etco2;
+    syncSliders();
+    updateDisplay();
+  });
+  db.ref(SESSION_ID + '/timer').on('value', snap => {
+    const t = snap.val();
+    if (!t) return;
+    if (t.running !== timerRunning || Math.abs(t.seconds - timerSeconds) > 2) {
+      timerSeconds = t.seconds;
+      timerRunning = t.running;
+      if (timerRunning) {
+        monitorStarted = true; // instructor started — unlock display
+        if (!timerInterval) timerInterval = setInterval(() => { timerSeconds++; renderTimer(); }, 1000);
+      } else if (!timerRunning && timerInterval) {
+        clearInterval(timerInterval); timerInterval = null;
+      }
+      renderTimer();
+      updateDisplay();
+    }
+  });
+  db.ref(SESSION_ID + '/interventions').on('value', snap => {
+    const list = snap.val();
+    if (list) {
+      interventionLog = Array.isArray(list) ? list : Object.values(list);
+      renderIntervLog();
+    }
+  });
+  db.ref(SESSION_ID + '/apgar').on('value', snap => {
+    const a = snap.val();
+    if (!a) return;
+    Object.entries(a).forEach(([min, score]) => {
+      apgarScores[parseInt(min)] = score;
+      apgarEnabled[parseInt(min)] = true;
+      updateApgarDisplay(parseInt(min));
+    });
+  });
+  // scenario sync removed
+}
+
+// Push vitals when instructor changes them
+// [removed duplicate]
+function ipSetVital(key, val, el) {
+  vitals[key] = parseFloat(val);
+  const vDef = IP_VITALS.find(v=>v.key===key);
+  const disp = document.getElementById('ipv-'+key);
+  if (disp) disp.textContent = vDef ? vDef.fmt(val) : Math.round(val);
+  syncSliders(); updateDisplay();
+  fbPush('vitals', {...vitals});
+}
+
+// Push timer state
+function fbPushTimer() {
+  fbPush('timer', { seconds: timerSeconds, running: timerRunning });
+}
+
+// Override timerToggle to also push to Firebase
+// [removed duplicate]
+function timerToggle() {
+  timerRunning = !timerRunning;
+  const btn = document.getElementById('btn-start');
+  const ipBtn = document.getElementById('ip-btn-start');
+  if (timerRunning) {
+    monitorStarted = true;
+    if (btn) { btn.textContent = 'DETENER'; btn.classList.add('stop'); }
+    if (ipBtn) { ipBtn.textContent = 'DETENER'; ipBtn.className = 'am-btn am-btn-skip'; }
+    timerInterval = setInterval(() => { timerSeconds++; renderTimer(); }, 1000);
+  } else {
+    if (btn) { btn.textContent = 'INICIAR'; btn.classList.remove('stop'); }
+    if (ipBtn) { ipBtn.textContent = 'INICIAR'; ipBtn.className = 'am-btn am-btn-confirm'; }
+    clearInterval(timerInterval); timerInterval = null;
+  }
+  fbPushTimer();
+}
+
+// Push apgar when confirmed
+// [removed duplicate]
+function confirmApgar() {
+  const filled = APGAR_CRITERIA.filter(c => apgarCurrentSelections[c.key] !== undefined);
+  if (filled.length < APGAR_CRITERIA.length) {
+    document.querySelectorAll('.am-crit-row').forEach((row, i) => {
+      if (apgarCurrentSelections[APGAR_CRITERIA[i].key] === undefined) {
+        row.style.borderColor = '#ff4444';
+        setTimeout(() => row.style.borderColor = '', 800);
+      }
+    });
+    return;
+  }
+  const total = APGAR_CRITERIA.reduce((s,c) => s + apgarCurrentSelections[c.key], 0);
+  apgarScores[apgarPending] = { ...apgarCurrentSelections, total, time: formatTime(timerSeconds) };
+  updateApgarDisplay(apgarPending);
+  fbPush('apgar/' + apgarPending, apgarScores[apgarPending]);
+  document.getElementById('apgar-modal-overlay').classList.remove('open');
+  renderIPApgar();
+  apgarPending = null;
+}
+
+// setScenario fully removed
+
+// ═══════════════════════════════════════════════════════════════
+// ─── VITALS TREND RECORDING ─────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+const trendData = { labels:[], hr:[], spo2:[], rr:[], etco2:[], sys:[], dia:[], temp:[] };
+let trendInterval = null;
+
+function startTrendRecording() {
+  if (trendInterval) return;
+  trendInterval = setInterval(() => {
+    if (!timerRunning) return;
+    const label = formatTime(timerSeconds);
+    trendData.labels.push(label);
+    trendData.hr.push(Math.round(vitals.hr));
+    trendData.spo2.push(Math.round(vitals.spo2));
+    trendData.rr.push(Math.round(vitals.rr));
+    trendData.etco2.push(Math.round(vitals.etco2));
+    trendData.sys.push(Math.round(vitals.sys));
+    trendData.dia.push(Math.round(vitals.dia));
+    trendData.temp.push(parseFloat(vitals.temp).toFixed(1));
+    // Keep last 60 points
+    if (trendData.labels.length > 60) {
+      Object.keys(trendData).forEach(k => trendData[k].shift());
+    }
+  }, 5000); // every 5 seconds
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ─── INTERVENTION LOG ───────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+const RCP_STEPS = [
+  { id:'s1',  cat:'INICIAL',       icon:'🌡️',  label:'Temp / secar / estimular' },
+  { id:'s2',  cat:'INICIAL',       icon:'✂️',  label:'Posición / permeabilizar vía aérea' },
+  { id:'s3',  cat:'VPP',           icon:'💨',  label:'VPP iniciada (21% O₂)' },
+  { id:'s4',  cat:'VPP',           icon:'📈',  label:'Ajuste FiO₂ / oximetría' },
+  { id:'s5',  cat:'VPP',           icon:'🔧',  label:'Corrección SIBO / VPP efectiva' },
+  { id:'s6',  cat:'INTUBACIÓN',    icon:'🔴',  label:'Intubación endotraqueal' },
+  { id:'s7',  cat:'INTUBACIÓN',    icon:'✅',  label:'Confirmación posición TET' },
+  { id:'s8',  cat:'MCE',           icon:'🤲',  label:'Masaje cardíaco externo iniciado' },
+  { id:'s9',  cat:'MCE',           icon:'🔄',  label:'Relación MCE:VPP 3:1' },
+  { id:'s10', cat:'MCE',           icon:'💊',  label:'FiO₂ 100% durante MCE' },
+  { id:'s11', cat:'MEDICACIÓN',    icon:'💉',  label:'Adrenalina EV / intraósea' },
+  { id:'s12', cat:'MEDICACIÓN',    icon:'💧',  label:'Expansor de volumen' },
+  { id:'s14', cat:'ACCESO',        icon:'🩺',  label:'Catéter venoso umbilical' },
+  { id:'s15', cat:'ACCESO',        icon:'🦴',  label:'Acceso intraóseo' },
+  { id:'s16b',cat:'VPP',           icon:'😮',  label:'Máscara laríngea' },
+  { id:'s16', cat:'MONITOREO',     icon:'📟',  label:'Monitor / oxímetro conectado' },
+  { id:'s17', cat:'MONITOREO',     icon:'📡',  label:'aEEG / ECG 12 derivaciones' },
+  { id:'s18', cat:'RESULTADO',     icon:'💚',  label:'Recuperación FC >100 lpm' },
+  { id:'s19', cat:'RESULTADO',     icon:'🛑',  label:'Suspensión de reanimación' },
+  { id:'s20', cat:'RESULTADO',     icon:'❄️',  label:'Criterios HT evaluados' },
+];
+
+let interventionLog = []; // [{id, label, time, seconds, free}]
+
+function renderIntervSteps(containerId) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  // Group by category
+  const cats = [...new Set(RCP_STEPS.map(s=>s.cat))];
+  container.innerHTML = cats.map(cat => {
+    const steps = RCP_STEPS.filter(s=>s.cat===cat);
+    return `<div style="grid-column:1/-1;font-size:9px;font-weight:700;color:#4a7aaa;letter-spacing:1.5px;margin-top:8px;margin-bottom:4px">${cat}</div>
+    ${steps.map(s => {
+      const done = interventionLog.find(l=>l.id===s.id);
+      return `<button onclick="registerInterv('${s.id}','${s.label.replace(/'/g,"\\'")}',false)"
+        style="text-align:left;background:${done?'#001a00':'#122b50'};border:1px solid ${done?'#00aa33':'#333'};border-radius:8px;padding:10px 12px;cursor:pointer;font-family:'Rajdhani',sans-serif;font-size:13px;font-weight:600;color:${done?'#00ff44':'#aaa'};transition:all 0.15s;display:flex;align-items:center;gap:8px;width:100%">
+        <span style="font-size:16px">${s.icon}</span>
+        <span style="flex:1;line-height:1.3">${s.label}</span>
+        ${done?`<span style="font-size:10px;font-family:'Share Tech Mono',monospace;color:#00aa33">${done.time}</span>`:''}
+      </button>`;
+    }).join('')}`;
+  }).join('');
+}
+
+function registerInterv(id, label, isFree, customLabel) {
+  const existing = interventionLog.find(l=>l.id===id);
+  if (existing && !isFree) {
+    // Toggle off
+    interventionLog = interventionLog.filter(l=>l.id!==id);
+  } else {
+    interventionLog.push({
+      id: id || 'free_' + Date.now(),
+      label: customLabel || label,
+      time: formatTime(timerSeconds),
+      seconds: timerSeconds,
+      free: isFree || false,
+      cat: isFree ? 'LIBRE' : (RCP_STEPS.find(s=>s.id===id)?.cat || 'OTRO')
+    });
+  }
+  interventionLog.sort((a,b)=>a.seconds-b.seconds);
+  fbPush('interventions', interventionLog);
+  renderIntervLog();
+  renderIntervSteps('interv-steps-grid');
+  renderIntervSteps('ip-interv-grid');
+}
+
+function addFreeInterv() {
+  const inp = document.getElementById('interv-free-input') || document.getElementById('ip-interv-free');
+  if (!inp || !inp.value.trim()) return;
+  registerInterv(null, inp.value.trim(), true);
+  inp.value = '';
+}
+
+function renderIntervLog() {
+  const logEl = document.getElementById('ip-interv-log');
+  const countEl = document.getElementById('interv-count-display');
+  if (countEl) countEl.textContent = interventionLog.length + ' registradas';
+  if (!logEl) return;
+  if (!interventionLog.length) { logEl.innerHTML = '<div style="font-size:12px;color:#3d6a9a;padding:8px 0">Sin intervenciones registradas aún.</div>'; return; }
+  logEl.innerHTML = interventionLog.slice().reverse().map(i =>
+    `<div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid #122b50;font-size:12px">
+      <span style="font-family:'Share Tech Mono',monospace;color:#ff9500;flex-shrink:0">${i.time}</span>
+      <span style="flex:1;color:#ccc">${i.label}</span>
+      <span style="font-size:10px;color:#3d6a9a;background:#122b50;padding:2px 6px;border-radius:4px">${i.cat}</span>
+    </div>`
+  ).join('');
+}
+
+function openIntervModal() {
+  if (appMode === 'monitor') return; // solo el instructor registra intervenciones
+  document.getElementById('interv-modal-overlay').style.display = 'flex';
+  document.getElementById('interv-timer-display').textContent = 'Tiempo: ' + formatTime(timerSeconds);
+  renderIntervSteps('interv-steps-grid');
+  renderIntervLog();
+}
+function closeIntervModal() {
+  document.getElementById('interv-modal-overlay').style.display = 'none';
+}
+
+// Update interv timer display while modal is open
+setInterval(() => {
+  const el = document.getElementById('interv-timer-display');
+  if (el && document.getElementById('interv-modal-overlay').style.display === 'flex') {
+    el.textContent = 'Tiempo: ' + formatTime(timerSeconds);
+  }
+}, 1000);
+
+// ═══════════════════════════════════════════════════════════════
+// ─── IPNAV EXTENSION ────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+
+// ═══════════════════════════════════════════════════════════════
+// ─── DASHBOARD & DEBRIEFING ─────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+let dashCharts = {};
+
+// ─── FINALIZAR & DASHBOARD ──────────────────────────────────────
+function finalizarReanimacion() {
+  if (timerRunning) {
+    timerRunning = false;
+    clearInterval(timerInterval);
+    timerInterval = null;
+    renderTimer();
+    fbPushTimer();
+  }
+  showDashboard();
+}
+
+function showDashboard() {
+  const overlay = document.getElementById('dashboard-overlay');
+  if (!overlay) return;
+  overlay.style.display = 'block';
+
+  // Header meta
+  const now = new Date().toLocaleString('es-AR');
+  const metaEl = document.getElementById('dash-meta');
+  if (metaEl) metaEl.textContent = 'Duración: ' + formatTime(timerSeconds) + ' · Generado: ' + now;
+
+  // Pre-fill brief from instructor pre-fields
+  const copy = (fromId, toId) => {
+    const src = document.getElementById(fromId);
+    const dst = document.getElementById(toId);
+    if (src && dst && src.value) dst.value = src.value;
+  };
+  copy('pre-scenario',   'brief-scenario');
+  copy('pre-objectives', 'brief-objectives');
+  // Center + datetime combined
+  const dtEl = document.getElementById('pre-datetime');
+  const centerEl = document.getElementById('pre-center');
+  const briefCenterEl = document.getElementById('brief-center');
+  if (briefCenterEl) {
+    const center = centerEl?.value || '';
+    let dtStr = '';
+    if (dtEl?.value) {
+      const d = new Date(dtEl.value);
+      dtStr = d.toLocaleString('es-AR', {day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
+    }
+    briefCenterEl.value = [center, dtStr].filter(Boolean).join(' — ');
+  }
+
+  // Apgar summary row
+  const apgarRow = document.getElementById('dash-apgar-row');
+  if (apgarRow) {
+    apgarRow.innerHTML = [1,5,10,15,20].map(min => {
+      const s = apgarScores[min];
+      if (!s) return '<div style="text-align:center;opacity:0.35"><div style="font-size:11px;color:#4a7aaa">' + min + ' min</div><div style="font-size:32px;font-family:monospace;color:#1e5080">—</div><div style="font-size:10px;color:#3d6a9a">no evaluado</div></div>';
+      const color = s.total>=7?'#00ff99':s.total>=4?'#ffaa00':'#ff3333';
+      const label = s.total>=7?'Normal':s.total>=4?'Dep. moderada':'Dep. grave';
+      return '<div style="text-align:center;background:#0e2850;border:1px solid ' + color + '33;border-radius:10px;padding:12px 16px">' +
+        '<div style="font-size:11px;color:#6aaad4;font-weight:700;letter-spacing:1px">' + min + ' min</div>' +
+        '<div style="font-size:42px;font-family:monospace;color:' + color + ';line-height:1.1">' + s.total + '</div>' +
+        '<div style="font-size:10px;color:' + color + ';font-weight:700;margin-top:2px">' + label + '</div>' +
+        '<div style="font-size:10px;color:#3d6a9a;margin-top:4px">FC:' + s.fc + ' R:' + s.resp + ' T:' + s.tono + ' Ref:' + s.reflex + ' Col:' + s.color + '</div>' +
+        '</div>';
+    }).join('');
+  }
+
+  // Charts + timeline
+  setTimeout(() => buildTrendCharts(), 100);
+  buildTimeline();
+}
+
+function closeDashboard() {
+  const overlay = document.getElementById('dashboard-overlay');
+  if (overlay) overlay.style.display = 'none';
+  if (timerSeconds >= 10 && appMode === 'instructor') {
+    saveSession();
+    showSaveToast('✓ Sesión guardada en historial');
+  }
+}
+
+function buildTrendCharts() {
+  const chartDefs = [
+    { id:'chart-hr-trend',   key:'hr',   color:'#00ff44', label:'FC', min:0, max:250 },
+    { id:'chart-spo2-trend', key:'spo2', color:'#00cfff', label:'SpO₂', min:50, max:100 },
+    { id:'chart-rr-trend',   key:'rr',   color:'#ffff00', label:'FR', min:0, max:100 },
+    { id:'chart-etco2-trend',key:'etco2',color:'#ff9500', label:'EtCO₂', min:0, max:60 },
+  ];
+  // Add intervention markers as vertical annotations
+  chartDefs.forEach(def => {
+    if (dashCharts[def.id]) { dashCharts[def.id].destroy(); }
+    const ctx = document.getElementById(def.id)?.getContext('2d');
+    if (!ctx) return;
+    const labels = trendData.labels;
+    const data = trendData[def.key];
+    if (!data.length) {
+      // Show "sin datos" message
+      ctx.fillStyle = '#333';
+      ctx.font = '12px Rajdhani';
+      ctx.textAlign = 'center';
+      ctx.fillText('Sin datos grabados', ctx.canvas.width/2, 60);
+      return;
+    }
+    dashCharts[def.id] = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [{
+          data,
+          borderColor: def.color,
+          backgroundColor: def.color + '18',
+          borderWidth: 2,
+          pointRadius: 3,
+          pointBackgroundColor: def.color,
+          fill: true,
+          tension: 0.3,
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { color:'#555', font:{size:9}, maxTicksLimit: 8 }, grid: { color:'#122b50' } },
+          y: { min: def.min, max: def.max, ticks: { color:'#555', font:{size:9} }, grid: { color:'#122b50' } }
+        }
+      }
+    });
+  });
+}
+
+function buildTimeline() {
+  const container = document.getElementById('dash-timeline');
+  if (!container) return;
+  // Merge interventions + marks
+  const allEvents = [
+    ...interventionLog.map(i => ({ ...i, type: 'intervention' })),
+    ...markTimes.map((t,idx) => ({ label: `Marca ${idx+1}`, time: t, type: 'mark', cat: 'MARCA', seconds: 0 })),
+    ...APGAR_MINUTES.filter(m=>apgarScores[m]).map(m => ({
+      label: `Apgar ${m}' = ${apgarScores[m].total}`, time: apgarScores[m].time,
+      type: 'apgar', cat: 'APGAR', seconds: APGAR_TRIGGER_SECONDS[m]
+    })),
+  ].sort((a,b) => (a.seconds||0)-(b.seconds||0));
+
+  if (!allEvents.length) {
+    container.innerHTML = '<div style="font-size:13px;color:#3d6a9a;padding:12px 0">Sin eventos registrados.</div>';
+    return;
+  }
+  const typeColors = { intervention:'#ff9500', mark:'#ffcc00', apgar:'#00cfff' };
+  const typeIcons  = { intervention:'⚡', mark:'📍', apgar:'📊' };
+  container.innerHTML = `
+    <div style="position:absolute;left:8px;top:0;bottom:0;width:2px;background:#222;border-radius:1px"></div>
+    ${allEvents.map(e => `
+      <div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:10px;position:relative">
+        <div style="width:18px;height:18px;border-radius:50%;background:${typeColors[e.type]||'#555'};display:flex;align-items:center;justify-content:center;font-size:10px;flex-shrink:0;margin-top:1px;position:relative;z-index:1">${typeIcons[e.type]||'•'}</div>
+        <div style="flex:1;padding-bottom:8px;border-bottom:1px solid #122b50">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="font-family:'Share Tech Mono',monospace;font-size:12px;color:${typeColors[e.type]||'#555'}">${e.time||'--:--'}</span>
+            <span style="font-size:10px;color:#3d6a9a;background:#122b50;padding:2px 6px;border-radius:4px">${e.cat||''}</span>
+          </div>
+          <div style="font-size:14px;font-weight:600;color:#ddd;margin-top:2px">${e.label}</div>
+        </div>
+      </div>
+    `).join('')}`;
+}
+
+// closeDashboard_stub removed
+
+// ═══════════════════════════════════════════════════════════════
+// ─── PDF EXPORT ─────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+async function exportDebriefPDF() {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation:'p', unit:'mm', format:'a4' });
+  const W = 210, M = 14;
+  let y = 0;
+  const now = new Date().toLocaleString('es-AR');
+
+  function newPage() { doc.addPage(); y = 14; }
+  function chk(need=10) { if (y+need > 282) newPage(); }
+
+  // ── Cover header ──
+  doc.setFillColor(8,8,8); doc.rect(0,0,W,32,'F');
+  doc.setFillColor(29,111,220); doc.rect(0,32,W,2,'F');
+  doc.setTextColor(255,255,255);
+  doc.setFontSize(9); doc.setFont('helvetica','normal');
+  doc.text('NEOMONITOR SIM — Simulación Neonatal', M, 11);
+  doc.setFontSize(18); doc.setFont('helvetica','bold');
+  doc.text('Informe de Debriefing', M, 22);
+  doc.setFontSize(9); doc.setFont('helvetica','normal');
+  doc.text(now, W-M, 22, {align:'right'});
+  y = 42;
+
+  // ── Caso clínico ──
+  const scenario = document.getElementById('brief-scenario')?.value || '—';
+  const center   = document.getElementById('brief-center')?.value   || '—';
+  const obj      = document.getElementById('brief-objectives')?.value || '—';
+  const notes    = document.getElementById('dash-notes')?.value     || '—';
+
+  doc.setFillColor(20,40,80); doc.rect(M, y-4, W-M*2, 8, 'F');
+  doc.setTextColor(100,160,255); doc.setFontSize(9); doc.setFont('helvetica','bold');
+  doc.text('CASO CLÍNICO', M+3, y+1);
+  y += 8;
+  doc.setTextColor(40,40,40); doc.setFontSize(10);
+  doc.setFont('helvetica','bold'); doc.text('Escenario:', M, y); doc.setFont('helvetica','normal'); doc.text(scenario, M+28, y); y+=6;
+  doc.setFont('helvetica','bold'); doc.text('Centro:', M, y);    doc.setFont('helvetica','normal'); doc.text(center, M+20, y); y+=6;
+  doc.setFont('helvetica','bold'); doc.text('Duración:', M, y);  doc.setFont('helvetica','normal'); doc.text(formatTime(timerSeconds), M+26, y); y+=8;
+  doc.setFontSize(9); doc.setFont('helvetica','bold'); doc.text('Objetivos / Brief:', M, y); y+=5;
+  doc.setFont('helvetica','normal');
+  doc.splitTextToSize(obj, W-M*2).forEach(line => { chk(); doc.text(line, M, y); y+=5; });
+  y += 4;
+
+  // ── Apgar ──
+  chk(20);
+  doc.setFillColor(40,34,0); doc.rect(M, y-4, W-M*2, 8, 'F');
+  doc.setTextColor(255,204,0); doc.setFontSize(9); doc.setFont('helvetica','bold');
+  doc.text('PUNTAJE APGAR', M+3, y+1);
+  y += 10;
+  const apgarDone = APGAR_MINUTES.filter(m=>apgarScores[m]);
+  if (!apgarDone.length) {
+    doc.setTextColor(120,120,120); doc.setFontSize(9); doc.setFont('helvetica','normal');
+    doc.text('Sin Apgar registrado.', M, y); y+=8;
+  } else {
+    const bw = (W-M*2)/5;
+    apgarDone.forEach((min,i) => {
+      const s = apgarScores[min];
+      const color = s.total>=7?[0,200,68]:s.total>=4?[255,170,0]:[255,50,50];
+      const bx = M + i*bw;
+      doc.setFillColor(15,15,15); doc.rect(bx, y-3, bw-2, 22, 'F');
+      doc.setDrawColor(...color); doc.setLineWidth(0.5); doc.rect(bx, y-3, bw-2, 22);
+      doc.setTextColor(120,120,120); doc.setFontSize(7);
+      doc.text(min+' min', bx+bw/2-2, y+1, {align:'center'});
+      doc.setTextColor(...color); doc.setFontSize(18); doc.setFont('helvetica','bold');
+      doc.text(String(s.total), bx+bw/2-2, y+11, {align:'center'});
+      const interp = s.total>=7?'Normal':s.total>=4?'Dep. mod.':'Dep. grave';
+      doc.setFontSize(6); doc.setTextColor(...color);
+      doc.text(interp, bx+bw/2-2, y+17, {align:'center'});
+    });
+    y += 28;
+  }
+
+  // ── Vitals trend (text table since can't render canvas to PDF easily) ──
+  chk(20);
+  doc.setFillColor(0,25,10); doc.rect(M, y-4, W-M*2, 8, 'F');
+  doc.setTextColor(0,255,68); doc.setFontSize(9); doc.setFont('helvetica','bold');
+  doc.text('TENDENCIA DE PARÁMETROS VITALES', M+3, y+1);
+  y += 10;
+  if (!trendData.labels.length) {
+    doc.setTextColor(120,120,120); doc.setFontSize(9); doc.setFont('helvetica','normal');
+    doc.text('Sin datos grabados (el cronómetro debe estar corriendo para registrar).', M, y); y+=8;
+  } else {
+    // Table header
+    const cols = ['Tiempo','FC','SpO₂','FR','EtCO₂','PNI S','PNI D'];
+    const cw = [22,18,18,18,18,18,18];
+    let cx = M;
+    doc.setFillColor(30,30,30);
+    doc.rect(M, y-3, W-M*2, 6, 'F');
+    doc.setTextColor(200,200,200); doc.setFontSize(7); doc.setFont('helvetica','bold');
+    cols.forEach((c,i) => { doc.text(c, cx+cw[i]/2, y, {align:'center'}); cx+=cw[i]; });
+    y += 5;
+    // Show max 20 rows (sampled)
+    const step = Math.max(1, Math.floor(trendData.labels.length/20));
+    for (let i=0; i<trendData.labels.length; i+=step) {
+      chk(5);
+      if (i%2===0) { doc.setFillColor(18,18,18); doc.rect(M, y-3, W-M*2, 5, 'F'); }
+      doc.setTextColor(180,180,180); doc.setFontSize(7); doc.setFont('helvetica','normal');
+      cx = M;
+      const row = [trendData.labels[i], trendData.hr[i], trendData.spo2[i], trendData.rr[i], trendData.etco2[i], trendData.sys[i], trendData.dia[i]];
+      row.forEach((v,j) => { doc.text(String(v), cx+cw[j]/2, y, {align:'center'}); cx+=cw[j]; });
+      y += 5;
+    }
+    y += 4;
+  }
+
+  // ── Timeline ──
+  chk(20);
+  doc.setFillColor(35,20,0); doc.rect(M, y-4, W-M*2, 8, 'F');
+  doc.setTextColor(255,149,0); doc.setFontSize(9); doc.setFont('helvetica','bold');
+  doc.text('LÍNEA DE TIEMPO — INTERVENCIONES', M+3, y+1);
+  y += 10;
+  const allEv = [
+    ...interventionLog.map(i => ({...i,type:'intervention'})),
+    ...APGAR_MINUTES.filter(m=>apgarScores[m]).map(m=>({
+      label:`Apgar ${m}' = ${apgarScores[m].total}`, time:apgarScores[m].time,
+      type:'apgar', cat:'APGAR', seconds:APGAR_TRIGGER_SECONDS[m]
+    })),
+    ...markTimes.map((t,idx) => ({label:`Marca ${idx+1}`,time:t,type:'mark',cat:'MARCA',seconds:0})),
+  ].sort((a,b)=>(a.seconds||0)-(b.seconds||0));
+  if (!allEv.length) {
+    doc.setTextColor(120,120,120); doc.setFontSize(9); doc.setFont('helvetica','normal');
+    doc.text('Sin intervenciones registradas.', M, y); y+=8;
+  } else {
+    allEv.forEach(e => {
+      chk(7);
+      doc.setFillColor(22,22,22); doc.rect(M, y-3, W-M*2, 6, 'F');
+      const tc = e.type==='intervention'?[255,149,0]:e.type==='apgar'?[0,207,255]:[255,204,0];
+      doc.setTextColor(...tc); doc.setFontSize(8); doc.setFont('helvetica','bold');
+      doc.text(e.time||'--:--', M+2, y);
+      doc.setTextColor(80,80,80); doc.setFontSize(7);
+      doc.text(e.cat||'', M+18, y);
+      doc.setTextColor(200,200,200); doc.setFont('helvetica','normal'); doc.setFontSize(8);
+      doc.text(e.label, M+40, y);
+      y += 7;
+    });
+  }
+  y += 4;
+
+  // ── Observations ──
+  chk(20);
+  doc.setFillColor(25,25,25); doc.rect(M, y-4, W-M*2, 8, 'F');
+  doc.setTextColor(150,150,150); doc.setFontSize(9); doc.setFont('helvetica','bold');
+  doc.text('OBSERVACIONES DEL INSTRUCTOR', M+3, y+1);
+  y += 10;
+  doc.setFont('helvetica','normal'); doc.setTextColor(160,160,160); doc.setFontSize(9);
+  doc.splitTextToSize(notes||'Sin observaciones.', W-M*2).forEach(line => { chk(); doc.text(line, M, y); y+=5; });
+
+  // Footer on every page
+  const totalPages = doc.getNumberOfPages();
+  for (let p=1; p<=totalPages; p++) {
+    doc.setPage(p);
+    doc.setFillColor(8,8,8); doc.rect(0,285,W,12,'F');
+    doc.setTextColor(80,80,80); doc.setFontSize(7); doc.setFont('helvetica','normal');
+    doc.text('NEOMONITOR SIM · CEFEN · SAP', M, 291);
+    doc.text(`Pág. ${p}/${totalPages}`, W-M, 291, {align:'right'});
+  }
+
+  doc.save(`Debriefing_${scenario.replace(/\s+/g,'_')}_${new Date().toLocaleDateString('es-AR').replace(/\//g,'-')}.pdf`);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ─── ADD INTERVENTIONS BTN TO MONITOR BOTTOM BAR ────────────────
+// ═══════════════════════════════════════════════════════════════
+// QR / session link display for instructor
+function showSessionLink() {
+  const url = window.location.href;
+  const msg = `Compartí esta URL con el instructor:\n\n${url}\n\nAmbos deben abrir la misma URL y elegir su rol (Monitor / Instructor).`;
+  alert(msg);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ─── INIT FIREBASE & TREND RECORDING ────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+// fbSubscribe() y startTrendRecording() se llaman desde startMode()
+// una vez que SESSION_ID está definido. No llamar en load.
+
+// startMode v1 merged into final version below
+</script>
+<script>
+// ═══════════════════════════════════════════════════════════════
+// ─── INSTRUCTOR LIVE MONITOR ────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+const IPLV = {
+  ecg:   { el:null, ctx:null, buf:null, pos:0, color:'#00ff44' },
+  spo2:  { el:null, ctx:null, buf:null, pos:0, color:'#00cfff' },
+  resp:  { el:null, ctx:null, buf:null, pos:0, color:'#ffff00' },
+  etco2: { el:null, ctx:null, buf:null, pos:0, color:'#ff9500' },
+};
+
+function initLiveCanvases() {
+  ['ecg','spo2','resp','etco2'].forEach(k => {
+    const el = document.getElementById('iplv-cv-' + k);
+    if (!el) return;
+    IPLV[k].el  = el;
+    IPLV[k].ctx = el.getContext('2d');
+    const wrap = el.parentElement;
+    el.width  = wrap.clientWidth  || 280;
+    el.height = wrap.clientHeight || 52;
+    IPLV[k].buf = new Float32Array(el.width).fill(el.height / 2);
+  });
+}
+
+window.addEventListener('resize', () => {
+  ['ecg','spo2','resp','etco2'].forEach(k => {
+    if (!IPLV[k].el) return;
+    const wrap = IPLV[k].el.parentElement;
+    IPLV[k].el.width  = wrap.clientWidth  || 280;
+    IPLV[k].el.height = wrap.clientHeight || 52;
+    IPLV[k].buf = new Float32Array(IPLV[k].el.width).fill(IPLV[k].el.height/2);
+  });
+}, true);
+
+let liveEcgP=0, liveSpo2P=0, liveRespP=0, liveEtco2P=0, liveInited=false;
+
+function drawLiveWave(cv, genFn, phase, sweepPxPerSec, dt) {
+  if (!cv.el || !cv.ctx || !cv.buf) return;
+  const W = cv.el.width, H = cv.el.height;
+  const ctx = cv.ctx;
+  const advance = sweepPxPerSec * dt * 0.45;
+  const steps   = Math.max(1, Math.round(advance));
+  for (let s = 0; s < steps; s++) {
+    const px = Math.round(cv.pos) % W;
+    ctx.fillStyle = '#0a1e3a'; ctx.fillRect(px, 0, 20, H);
+    const y = genFn(phase + s * dt/steps) * H;
+    cv.buf[px] = isNaN(y) ? H/2 : Math.max(0, Math.min(H-1, y));
+    cv.pos = (cv.pos + advance/steps);
+  }
+  ctx.clearRect(0, 0, W, H);
+  const wp = Math.round(cv.pos) % W;
+  ctx.strokeStyle = cv.color; ctx.lineWidth = 1.6;
+  ctx.shadowColor = cv.color; ctx.shadowBlur = 5;
+  ctx.beginPath(); let pd = false;
+  for (let i = 0; i < W; i++) {
+    if (i >= W - 21) { pd = false; continue; }
+    const xi = (wp - W + i + W) % W;
+    const yi = cv.buf[xi];
+    if (!pd) { ctx.moveTo(i, yi); pd = true; } else ctx.lineTo(i, yi);
+  }
+  ctx.stroke(); ctx.shadowBlur = 0;
+}
+
+function updateLiveMonitorDisplay() {
+  if (appMode !== 'instructor') return;
+  const s = (id, v) => { const el=document.getElementById(id); if(el) el.textContent=v; };
+  const fmt = (v,d=0) => d ? parseFloat(v).toFixed(d) : Math.round(v);
+  if (monitorStarted) {
+    s('iplv-hr',   vitals.hr<5   ? '---' : fmt(vitals.hr));
+    s('iplv-spo2', fmt(vitals.spo2));
+    s('iplv-rr',   vitals.rr<2   ? '---' : fmt(vitals.rr));
+    s('iplv-sys',  fmt(vitals.sys));
+    s('iplv-dia',  fmt(vitals.dia));
+    s('iplv-temp', fmt(vitals.temp,1));
+    s('iplv-etco2',vitals.etco2<1 ? '---' : fmt(vitals.etco2));
+  }
+  s('iplv-timer', formatTime(timerSeconds));
+  const stEl = document.getElementById('iplv-status');
+  if (stEl) {
+    stEl.textContent = timerRunning ? 'EN CURSO' : monitorStarted ? 'PAUSADO' : 'EN ESPERA';
+    stEl.style.color = timerRunning ? '#00cc44' : monitorStarted ? '#ffaa00' : '#444';
+  }
+
+  APGAR_MINUTES.forEach(min => {
+    const score = apgarScores[min];
+    const valEl = document.getElementById('iplv-apgar-val-' + min);
+    const slotEl = document.getElementById('iplv-apgar-' + min);
+    if (!valEl || !slotEl) return;
+    if (score) {
+      const c = score.total>=7?'#00ff44':score.total>=4?'#ffaa00':'#ff3333';
+      valEl.textContent = score.total; valEl.style.color = c; slotEl.style.borderColor = c+'55';
+    } else if (apgarEnabled[min]) {
+      valEl.textContent = '?'; valEl.style.color = '#ffcc00'; slotEl.style.borderColor = '#664400';
+    } else {
+      valEl.textContent = '—'; valEl.style.color = '#1a4a7a'; slotEl.style.borderColor = '';
+    }
+  });
+}
+
+// Override the render loop to also drive live canvases
+// Save reference to current loop (defined above in the page)
+// We re-declare loop here — this is the final version
+function loop(ts) {
+  const dt = Math.min((ts - lastTs) / 1000, 0.05);
+  lastTs = ts;
+  ecgPhase += dt; spo2Phase += dt; respPhase += dt; etco2Phase += dt;
+  drawWave(CVS.ecg,   genECG,   ecgPhase,   SWEEP.ecg,   dt);
+  drawWave(CVS.spo2,  genSpO2,  spo2Phase,  SWEEP.spo2,  dt);
+  drawWave(CVS.resp,  genResp,  respPhase,  SWEEP.resp,   dt);
+  drawWave(CVS.etco2, genEtCO2, etco2Phase, SWEEP.etco2, dt);
+  if (appMode === 'instructor' && IPLV.ecg.el) {
+    if (!liveInited) { liveEcgP=ecgPhase; liveSpo2P=spo2Phase; liveRespP=respPhase; liveEtco2P=etco2Phase; liveInited=true; }
+    liveEcgP+=dt; liveSpo2P+=dt; liveRespP+=dt; liveEtco2P+=dt;
+    drawLiveWave(IPLV.ecg,   genECG,   liveEcgP,   SWEEP.ecg,   dt);
+    drawLiveWave(IPLV.spo2,  genSpO2,  liveSpo2P,  SWEEP.spo2,  dt);
+    drawLiveWave(IPLV.resp,  genResp,  liveRespP,  SWEEP.resp,  dt);
+    drawLiveWave(IPLV.etco2, genEtCO2, liveEtco2P, SWEEP.etco2, dt);
+    updateLiveMonitorDisplay();
+  }
+  requestAnimationFrame(loop);
+}
+
+// ─── THE ONE TRUE startMode ─────────────────────────────────────
+// startMode main — merged below
+</script>
+<script>
+// ═══════════════════════════════════════════════════════════════
+// ─── FULL RESET (Nueva simulación) ──────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+function fullReset() {
+  if (!confirm('¿Iniciar nueva simulación? Se restablecen el cronómetro, Apgar e intervenciones.')) return;
+
+  // Stop & zero timer
+  timerRunning = false;
+  clearInterval(timerInterval); timerInterval = null;
+  timerSeconds = 0; markCount = 0; markTimes = [];
+  monitorStarted = false;
+  timerInterval = null;
+
+  // Reset Apgar
+  apgarScores = {}; apgarEnabled = {}; apgarPending = null;
+  APGAR_MINUTES.forEach(min => {
+    const slot  = document.getElementById('apgar-slot-' + min);
+    const valEl = document.getElementById('apgar-val-' + min);
+    if (slot)  slot.className = 'apgar-slot locked';
+    if (valEl) valEl.textContent = '—';
+    const ipSlot = document.getElementById('ip-apgar-slot-' + min);
+    if (ipSlot) ipSlot.className = 'ip-apgar-slot locked';
+  });
+
+  // Reset interventions
+  interventionLog = [];
+
+  // Reset trend data
+  Object.keys(trendData).forEach(k => trendData[k] = []);
+
+  // Reset vitals to neutral start values
+  Object.assign(vitals, { hr:140, spo2:96, rr:40, sys:65, dia:40, temp:36.8, etco2:38 });
+
+  // Reset UI
+  renderTimer();
+  renderIPApgar();
+  renderIntervSteps('ip-interv-grid');
+  renderIntervLog();
+  syncSliders();
+  updateDisplay();
+  ipSyncTimer();
+
+  // Update all timers display
+  const ipTD = document.getElementById('ip-timer-display');
+  if (ipTD) ipTD.textContent = '00:00';
+
+  // Push reset to Firebase so monitor also resets
+  if (SESSION_ID) {
+    db.ref(SESSION_ID).set({
+      meta: { reset: Date.now() },
+      vitals: {...vitals}
+    });
+  }
+
+  // Render interv steps
+  renderIntervSteps('ip-interv-grid');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ─── SESSION SAVE / HISTORY (localStorage) ──────────────────────
+// ═══════════════════════════════════════════════════════════════
+const SESSIONS_KEY = 'neomonitor_sessions_v1';
+
+function saveSession() {
+  const scenario   = document.getElementById('brief-scenario')?.value || '';
+  const center     = document.getElementById('brief-center')?.value   || '';
+  const objectives = document.getElementById('brief-objectives')?.value || '';
+  const notes      = document.getElementById('dash-notes')?.value     || '';
+  const session = {
+    id:          Date.now(),
+    date:        new Date().toLocaleString('es-AR'),
+    duration:    formatTime(timerSeconds),
+    scenario,
+    center,
+    objectives,
+    notes,
+    apgarScores: JSON.parse(JSON.stringify(apgarScores)),
+    interventions: JSON.parse(JSON.stringify(interventionLog)),
+    marks:       [...markTimes],
+    trendData:   JSON.parse(JSON.stringify(trendData)),
+  };
+  const existing = getSessions();
+  existing.unshift(session); // newest first
+  if (existing.length > 20) existing.splice(20); // keep last 20
+  localStorage.setItem(SESSIONS_KEY, JSON.stringify(existing));
+  return session;
+}
+
+function getSessions() {
+  try { return JSON.parse(localStorage.getItem(SESSIONS_KEY) || '[]'); }
+  catch { return []; }
+}
+
+// finalizarReanimacion v2 — merged
+
+// ── Save on PDF export ──
+const _exportPDFBase = window.exportDebriefPDF;
+async function exportDebriefPDF() {
+  saveSession();
+  await _exportPDFBase();
+  // Show toast-style confirmation
+  showSaveToast('✓ Sesión guardada en historial');
+}
+
+function showSaveToast(msg) {
+  let t = document.getElementById('save-toast');
+  if (!t) {
+    t = document.createElement('div');
+    t.id = 'save-toast';
+    t.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#003300;color:#00ff44;border:1px solid #006600;border-radius:999px;padding:12px 22px;font-family:Rajdhani,sans-serif;font-weight:700;font-size:14px;z-index:999;transition:opacity 0.3s;white-space:nowrap';
+    document.body.appendChild(t);
+  }
+  t.textContent = msg; t.style.opacity = '1';
+  setTimeout(() => t.style.opacity = '0', 2500);
+}
+
+// ── Add "Guardar sesión" button to dashboard ──
+window.addEventListener('load', () => {
+  const dashHeader = document.querySelector('#dashboard-overlay > div > div:first-child > div:last-child');
+  if (dashHeader) {
+    const saveBtn = document.createElement('button');
+    saveBtn.textContent = '💾 Guardar sesión';
+    saveBtn.style.cssText = "background:#003300;color:#00ff44;border:1px solid #006600;border-radius:8px;padding:10px 18px;font-family:'Rajdhani',sans-serif;font-weight:700;font-size:13px;cursor:pointer";
+    saveBtn.onclick = () => { saveSession(); showSaveToast('✓ Sesión guardada'); };
+    dashHeader.insertBefore(saveBtn, dashHeader.firstChild);
+  }
+}, {once:false});
+
+// ═══════════════════════════════════════════════════════════════
+// ─── HISTORY OVERLAY ────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+function showHistory() {
+  let overlay = document.getElementById('history-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'history-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:600;background:#071528;overflow-y:auto;font-family:Rajdhani,sans-serif;display:none';
+    overlay.innerHTML = `
+      <div style="max-width:900px;margin:0 auto;padding:20px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;padding-bottom:14px;border-bottom:1px solid #222">
+          <div>
+            <div style="font-size:11px;color:#4a7aaa;letter-spacing:2px;font-family:'Share Tech Mono',monospace">NEOMONITOR SIM</div>
+            <div style="font-size:22px;font-weight:700;margin-top:2px">Historial de sesiones</div>
+          </div>
+          <div style="display:flex;gap:10px">
+            <button onclick="clearHistory()" style="background:#0e1e40;color:#ff4444;border:1px solid #440000;border-radius:8px;padding:8px 14px;font-family:'Rajdhani',sans-serif;font-weight:700;font-size:12px;cursor:pointer">🗑 Borrar todo</button>
+            <button onclick="document.getElementById('history-overlay').style.display='none'" style="background:#122b50;color:#6aaad4;border:1px solid #333;border-radius:8px;padding:8px 14px;font-family:'Rajdhani',sans-serif;font-weight:700;font-size:12px;cursor:pointer">Cerrar</button>
+          </div>
+        </div>
+        <div id="history-list"></div>
+      </div>`;
+    document.body.appendChild(overlay);
+  }
+  renderHistoryList();
+  overlay.style.display = 'block';
+}
+
+function renderHistoryList() {
+  const list = document.getElementById('history-list');
+  const sessions = getSessions();
+  if (!sessions.length) {
+    list.innerHTML = '<div style="text-align:center;padding:40px;color:#3d6a9a;font-size:14px">Sin sesiones guardadas aún.</div>';
+    return;
+  }
+  list.innerHTML = sessions.map((s, idx) => {
+    const apgarSummary = Object.entries(s.apgarScores||{}).map(([m,sc]) => {
+      const color = sc.total>=7?'#00ff44':sc.total>=4?'#ffaa00':'#ff3333';
+      return `<span style="font-family:'Share Tech Mono',monospace;color:${color};margin-right:8px">${m}': <strong>${sc.total}</strong></span>`;
+    }).join('') || '<span style="color:#444">Sin Apgar</span>';
+    return `
+    <div style="background:#0d2548;border:1px solid #222;border-radius:12px;padding:16px 18px;margin-bottom:10px">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap">
+        <div style="flex:1">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px">
+            <span style="font-family:'Share Tech Mono',monospace;font-size:11px;color:#555">${s.date}</span>
+            <span style="font-family:'Share Tech Mono',monospace;font-size:11px;color:#ffcc00">⏱ ${s.duration}</span>
+            ${s.center ? `<span style="font-size:11px;color:#777;background:#122b50;padding:2px 8px;border-radius:4px">${s.center}</span>` : ''}
+          </div>
+          <div style="font-size:16px;font-weight:700;color:#ddd;margin-bottom:6px">${s.scenario || 'Sin nombre'}</div>
+          <div style="font-size:12px;margin-bottom:6px">${apgarSummary}</div>
+          <div style="font-size:11px;color:#555">${(s.interventions||[]).length} intervenciones · ${(s.marks||[]).length} marcas</div>
+        </div>
+        <div style="display:flex;gap:8px;flex-shrink:0">
+          <button onclick="loadSessionDashboard(${idx})" style="background:#002244;color:#4488ff;border:1px solid #224466;border-radius:8px;padding:8px 14px;font-family:'Rajdhani',sans-serif;font-weight:700;font-size:12px;cursor:pointer">Ver dashboard</button>
+          <button onclick="deleteSession(${idx})" style="background:#0e1e40;color:#ff4444;border:1px solid #330000;border-radius:8px;padding:8px 10px;font-family:'Rajdhani',sans-serif;font-weight:700;font-size:12px;cursor:pointer">✕</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function loadSessionDashboard(idx) {
+  const sessions = getSessions();
+  const s = sessions[idx];
+  if (!s) return;
+
+  // Load session data into current state temporarily for dashboard
+  const savedApgar    = JSON.parse(JSON.stringify(apgarScores));
+  const savedInterv   = JSON.parse(JSON.stringify(interventionLog));
+  const savedTrend    = JSON.parse(JSON.stringify(trendData));
+  const savedSeconds  = timerSeconds;
+  const savedMarks    = [...markTimes];
+
+  // Inject session data
+  Object.assign(apgarScores, s.apgarScores||{});
+  interventionLog = s.interventions || [];
+  Object.keys(trendData).forEach(k => trendData[k] = (s.trendData||{})[k] || []);
+  timerSeconds = 0; // will show from session
+  // Parse duration to seconds
+  const parts = (s.duration||'00:00').split(':');
+  timerSeconds = parseInt(parts[0])*60 + parseInt(parts[1]);
+  markTimes = s.marks || [];
+
+  document.getElementById('history-overlay').style.display = 'none';
+  showDashboard();
+
+  // Pre-fill brief fields
+  const bf = (id, val) => { const el=document.getElementById(id); if(el) el.value=val; };
+  bf('brief-scenario',   s.scenario||'');
+  bf('brief-center',     s.center||'');
+  bf('brief-objectives', s.objectives||'');
+  bf('dash-notes',       s.notes||'');
+
+  // Add "back to history" button
+  const meta = document.getElementById('dash-meta');
+  if (meta) meta.innerHTML = `<span style="color:#4488ff;cursor:pointer" onclick="restoreAndCloseHistory()">← Historial</span> &nbsp;·&nbsp; ${s.date} &nbsp;·&nbsp; Duración: ${s.duration}`;
+
+  // Store restore function
+  window._restoreSession = () => {
+    Object.assign(apgarScores, savedApgar);
+    interventionLog = savedInterv;
+    Object.keys(trendData).forEach(k => trendData[k] = savedTrend[k]);
+    timerSeconds = savedSeconds;
+    markTimes = savedMarks;
+  };
+}
+
+function restoreAndCloseHistory() {
+  if (window._restoreSession) window._restoreSession();
+  closeDashboard();
+  showHistory();
+}
+
+function deleteSession(idx) {
+  const sessions = getSessions();
+  sessions.splice(idx, 1);
+  localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
+  renderHistoryList();
+}
+
+function clearHistory() {
+  if (confirm('¿Borrar todo el historial de sesiones?')) {
+    localStorage.removeItem(SESSIONS_KEY);
+    renderHistoryList();
+  }
+}
+
+// ── Add History button to instructor header ──
+// We do this after startMode sets up the UI
+// startMode v4 removed
+
+// closeDashboard old — using version at ~2892
+
+// ── Reset Firebase listener to also reset Apgar on Firebase reset signal ──
+const _fbSubBase = window.fbSubscribe;
+// Patch the firebase subscribe to detect reset signals
+function patchFbReset() {
+  if (!SESSION_ID) return;
+  db.ref(SESSION_ID + '/meta/reset').on('value', snap => {
+    if (!snap.val()) return;
+    if (appMode === 'monitor') {
+      // Reset monitor state
+      apgarScores = {}; apgarEnabled = {}; monitorStarted = false;
+      APGAR_MINUTES.forEach(min => {
+        const slot  = document.getElementById('apgar-slot-' + min);
+        const valEl = document.getElementById('apgar-val-' + min);
+        if (slot)  slot.className = 'apgar-slot locked';
+        if (valEl) valEl.textContent = '—';
+      });
+      updateDisplay();
+      renderTimer();
+    }
+  });
+}
+
+// startMode v5 removed
+
+// Render interv steps on tab switch to vitals
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+// [removed duplicate]
+</script>
+<script>
+// ─── MONITOR VIEW FROM INSTRUCTOR (with back button) ─────────────
+function goToMonitorView() {
+  // Show monitor but inject a floating "back to instructor" button
+  document.getElementById('monitor').classList.remove('hidden');
+  document.getElementById('instructor-panel').classList.remove('active');
+  document.getElementById('dashboard-overlay').style.display = 'none';
+
+  // Inject floating back button if not already there
+  if (!document.getElementById('back-to-instructor-btn')) {
+    const btn = document.createElement('button');
+    btn.id = 'back-to-instructor-btn';
+    btn.innerHTML = '🎛️ Instructor';
+    btn.style.cssText = `
+      position: fixed; top: 58px; right: 10px; z-index: 200;
+      background: #062244; color: #4488ff;
+      border: 1px solid #1e5080; border-radius: 8px;
+      padding: 8px 14px; font-family: 'Rajdhani', sans-serif;
+      font-weight: 700; font-size: 13px; cursor: pointer;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.4);
+      letter-spacing: 0.5px;
+    `;
+    btn.onclick = backToInstructor;
+    document.body.appendChild(btn);
+  }
+  document.getElementById('back-to-instructor-btn').style.display = 'block';
+
+  // Init canvases if needed
+  if (!CVS.ecg.el) initCanvases();
+  requestAnimationFrame(loop);
+}
+
+function backToInstructor() {
+  document.getElementById('monitor').classList.add('hidden');
+  document.getElementById('instructor-panel').classList.add('active');
+  const btn = document.getElementById('back-to-instructor-btn');
+  if (btn) btn.style.display = 'none';
+  // Re-init live canvases
+  setTimeout(() => { initLiveCanvases(); liveInited = false; }, 100);
+}
+
+// ─── SYNC PRE-BRIEF TO DASHBOARD FIELDS ──────────────────────────
+// When dashboard opens, pre-fill from the brief fields the instructor filled
+// showDashboard v2 — merged
+
+// ─── SET CURRENT DATETIME ON INSTRUCTOR LOAD ─────────────────────
+function initPreDatetime() {
+  const el = document.getElementById('pre-datetime');
+  if (!el || el.value) return;
+  const now = new Date();
+  // format for datetime-local: YYYY-MM-DDTHH:MM
+  const pad = n => String(n).padStart(2,'0');
+  el.value = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
+}
+
+// Auto-fill datetime when instructor mode starts
+// [removed duplicate]
+function ipNav(tab) {
+  ['vitals','alarmas','apgar'].forEach(t => {
+    const sec = document.getElementById('iptab-' + t);
+    const btn = document.getElementById('ipnav-' + t);
+    if (sec) sec.style.display = t === tab ? '' : 'none';
+    if (btn) btn.classList.toggle('active', t === tab);
+  });
+  if (tab === 'apgar') renderIPApgar();
+  if (tab === 'vitals') {
+    setTimeout(initPreDatetime, 100);
+    renderIntervSteps('ip-interv-grid');
+    renderIntervLog();
+  }
+}
+
+// Also init on instructor mode start
+window.addEventListener('load', () => {
+  // Will be called once instructor starts
+}, {once: true});
+
+// startMode datetime override — merged below
+
+// ─── WAVES & PARAMS HIDDEN UNTIL STARTED — reinforce guard ────────
+// Override updateDisplay to be absolutely sure
+// [removed duplicate]
+function updateDisplay() {
+  if (!monitorStarted) {
+    ['val-hr','val-spo2','val-rr','val-sys','val-dia','val-map','val-temp','val-etco2'].forEach(id => {
+      const el = document.getElementById(id); if (el) el.textContent = '---';
+    });
+    return;
+  }
+  document.getElementById('val-hr').textContent    = vitals.hr < 5 ? '---' : Math.round(vitals.hr);
+  document.getElementById('val-spo2').textContent  = Math.round(vitals.spo2);
+  document.getElementById('val-rr').textContent    = vitals.rr < 2 ? '---' : Math.round(vitals.rr);
+  document.getElementById('val-sys').textContent   = Math.round(vitals.sys);
+  document.getElementById('val-dia').textContent   = Math.round(vitals.dia);
+  const map = Math.round((vitals.sys + 2*vitals.dia) / 3);
+  document.getElementById('val-map').textContent   = '(' + map + ')';
+  document.getElementById('val-temp').textContent  = parseFloat(vitals.temp).toFixed(1);
+  document.getElementById('val-etco2').textContent = vitals.etco2 < 1 ? '---' : Math.round(vitals.etco2);
+  checkAlarms();
+}
+</script>
+<script>
+// ═══════════════════════════════════════════════════════════════
+// ─── THE ONE AND ONLY startMode ─────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+function startMode(mode) {
+  appMode = mode;
+
+  // Hide mode selector
+  const sel = document.getElementById('mode-selector');
+  if (sel) sel.style.display = 'none';
+
+  // Connect Firebase now that SESSION_ID is set
+  fbSubscribe();
+
+  if (mode === 'monitor') {
+    // ── MONITOR ──
+    document.getElementById('monitor').classList.remove('hidden');
+    document.getElementById('instructor-panel').classList.remove('active');
+    const dash = document.getElementById('dashboard-overlay');
+    if (dash) dash.style.display = 'none';
+
+    // Disable vitals controls — monitor can only see, not change
+    document.querySelectorAll('.param-box').forEach(b => b.style.pointerEvents = 'none');
+    const ct = document.getElementById('ctrl-toggle');
+    if (ct) ct.style.display = 'none';
+
+    // Show room code on topbar
+    const logo = document.querySelector('.tb-logo');
+    if (logo && SESSION_ID) logo.textContent = 'SALA ' + SESSION_ID.replace('sala_','');
+
+    // Start render loop
+    if (!CVS.ecg.el) initCanvases();
+    requestAnimationFrame(loop);
+
+  } else {
+    // ── INSTRUCTOR ──
+    document.getElementById('monitor').classList.add('hidden');
+    document.getElementById('instructor-panel').classList.add('active');
+
+    // Render all instructor panels
+    renderIPVitals();
+    renderIPAlarms();
+    renderIPApgar();
+
+    // Show room code in badge
+    const badge = document.querySelector('.ip-badge');
+    if (badge && SESSION_ID) badge.textContent = 'INSTRUCTOR · SALA ' + SESSION_ID.replace('sala_','');
+
+    // Add history button to nav (once)
+    setTimeout(() => {
+      const nav = document.querySelector('.ip-nav');
+      if (nav && !document.getElementById('ip-history-btn')) {
+        const btn = document.createElement('div');
+        btn.id = 'ip-history-btn';
+        btn.className = 'ip-nav-btn';
+        btn.textContent = '📋 Historial';
+        btn.style.cssText = 'background:#001a22;color:#00cfff;border-color:#004466';
+        btn.onclick = showHistory;
+        nav.insertBefore(btn, nav.firstChild);
+      }
+    }, 150);
+
+    // Init canvases + live preview
+    if (!CVS.ecg.el) initCanvases();
+    setTimeout(() => {
+      initLiveCanvases();
+      liveInited = false;
+      renderIntervSteps('ip-interv-grid');
+      renderIntervLog();
+      initPreDatetime();
+    }, 120);
+
+    // Push current vitals to Firebase + start recording
+    fbPush('vitals', {...vitals});
+    startTrendRecording();
+    requestAnimationFrame(loop);
+
+    // Patch Firebase reset listener
+    setTimeout(patchFbReset, 500);
+  }
+}
+</script>
+<script>
+// ── PWA: Service Worker registration ──
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js')
+      .then(reg => console.log('SW registrado:', reg.scope))
+      .catch(err => console.warn('SW error:', err));
+  });
+}
+
+// ── PWA: Forzar landscape en móvil (Android Chrome) ──
+function lockLandscape() {
+  if (screen.orientation && screen.orientation.lock) {
+    screen.orientation.lock('landscape').catch(() => {});
+  }
+}
+// Intentar al cargar y al entrar en fullscreen
+window.addEventListener('load', lockLandscape);
+document.addEventListener('fullscreenchange', lockLandscape);
+
+// ── Overlay portrait ──
+function checkOrientation() {
+  const overlay = document.getElementById('rotate-overlay');
+  if (!overlay) return;
+  const isPortrait = window.innerHeight > window.innerWidth;
+  const isMobile = window.innerWidth < 900;
+  overlay.classList.toggle('show', isPortrait && isMobile);
+}
+window.addEventListener('resize', checkOrientation);
+window.addEventListener('orientationchange', checkOrientation);
+window.addEventListener('load', checkOrientation);
+</script>
